@@ -294,6 +294,7 @@ ctest --test-dir out/<platform>/debug --output-on-failure
 | M02-项目构建系统深度解析 | ✅ 已完成 | 16 md + README | 5章拆分为子目录，每章3-4节 |
 | M03-平台抽象层解析 | ✅ 已完成 | 18 md + README | 5章拆分为子目录，每章2-5节 |
 | P06-FFmpeg音视频开发 | ✅ 已完成 | 26 md + README | 7章拆分为子目录，每章3-4节 |
+| P07-OpenAL音频编程 | ✅ 已完成 | 14 md + README | 4章拆分为子目录，每章2-5节 |
 
 ## 项目目标
 

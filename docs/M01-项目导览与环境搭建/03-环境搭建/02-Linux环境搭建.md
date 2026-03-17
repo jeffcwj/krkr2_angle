@@ -1,170 +1,400 @@
 # Linux 环境搭建
+> **所属模块：** M01-项目导览与环境搭建  
+> **所属章节：** 03-环境搭建  
+> **前置知识：** [01-Windows环境搭建](./01-Windows环境搭建.md)  
+> **预计阅读时间：** 45-60 分钟  
+> **适用系统：** Ubuntu 22.04/24.04、Fedora、Arch、Debian、WSL2、Docker  
+> **最后更新：** 2026-03-17
 
-本章节将引导你在 Linux 系统上搭建 KR2 项目的开发环境。我们以 Ubuntu 22.04/24.04 LTS 为主要示例，同时也会提及 Fedora 和 Arch Linux 的安装方法。
+## 本节目标
 
-## 1. 前提条件
+读完本节后，你将能够：
 
-- 推荐系统：Ubuntu 22.04 LTS 或 Ubuntu 24.04 LTS。
-- 基础权限：需要 `sudo` 权限以安装软件包。
-- 编译工具：Linux 环境下通常使用 GCC 编译器。
+1. 根据 KR2 真实配置准备 Linux 开发机。
+2. 在主流发行版安装完整系统依赖。
+3. 在 GCC 与 Clang 之间做合理选择。
+4. 配置 CMake、Ninja、vcpkg、bison、flex。
+5. 用验证清单快速定位环境问题。
+6. 在 WSL2 与 Docker 中复用同一流程。
 
-## 2. 安装 GCC (build-essential)
+## 1. 先看项目真实配置
 
-首先更新软件包列表并安装基础构建工具。
+安装环境前，先读三份文件：
 
-在 Ubuntu/Debian 上运行：
+- `krkr2/CMakePresets.json`
+- `krkr2/vcpkg.json`
+- `krkr2/.github/workflows/build-linux.yml`
+
+你需要确认：
+
+1. Linux preset 使用 `Ninja`。
+2. Linux 常用预设是 `Linux Debug Config`、`Linux Release Config`。
+3. CI 里明确安装了 `gcc g++ bison python3 nasm ninja-build`。
+4. CI 里明确安装了 X11/OpenGL/GTK 开发包。
+5. CI 固定 CMake 版本为 `3.31.1`。
+
+## 2. 支持的发行版详解
+
+| 发行版 | 特点 | 建议 |
+| :--- | :--- | :--- |
+| Ubuntu 22.04 LTS | 文档最多，最稳妥 | 新手与团队统一环境首选 |
+| Ubuntu 24.04 LTS | 工具链更现代 | 适合长期主力开发机 |
+| Fedora | GCC/Clang 更新快 | 适合偏 LLVM 工作流 |
+| Arch Linux | 版本新、更新快 | 适合有经验用户 |
+| Debian | 稳定保守 | 适合企业与长期维护场景 |
+
+
+## 3. GCC vs Clang 选择和版本要求
+
+- GCC 推荐 `11+`，更建议 `12/13`。
+- Clang 推荐 `15+`，更建议 `16/17`。
+- CMake 最低 `3.28`，建议 `3.31.1+`。
+
+### 3.1 GCC 安装
+
+```bash
+# Ubuntu / Debian
+sudo apt update
+sudo apt install -y build-essential gcc g++ gdb
+
+# Fedora
+sudo dnf groupinstall -y "Development Tools"
+sudo dnf install -y gcc gcc-c++ gdb
+
+# Arch
+sudo pacman -S --needed base-devel gcc gdb
+```
+
+### 3.2 Clang 安装（可选）
+
+```bash
+# Ubuntu / Debian
+sudo apt install -y clang lldb
+
+# Fedora
+sudo dnf install -y clang lldb
+
+# Arch
+sudo pacman -S --needed clang lldb
+```
+
+### 3.3 编译器验证
+
+```bash
+gcc --version
+g++ --version
+clang --version
+clang++ --version
+```
+
+## 4. 系统依赖包安装（按发行版）
+
+下面的依赖集合覆盖 CI 中 Linux 构建主链路。
+
+### 4.1 Ubuntu / Debian 依赖
+
 ```bash
 sudo apt update
-sudo apt install build-essential g++ gdb git
+sudo apt install -y \
+  git curl wget unzip zip tar pkg-config perl python3 python3-pip \
+  gcc g++ gdb bison flex nasm yasm ninja-build \
+  libx11-dev libxext-dev libxft-dev libxmu-dev libxi-dev libxxf86vm-dev \
+  libglu1-mesa-dev libgl1-mesa-dev libgl2ps-dev libglew-dev \
+  libasound2-dev libpulse-dev libgtk-3-dev \
+  libfontconfig1-dev libsqlite3-dev libzip-dev libssl-dev \
+  libcurl4-gnutls-dev autoconf automake libtool libltdl-dev
 ```
 
-在 Fedora 上运行：
+### 4.2 Fedora 依赖
+
 ```bash
-sudo dnf groupinstall "Development Tools" "C Development Tools and Libraries"
+sudo dnf groupinstall -y "Development Tools" "C Development Tools and Libraries"
+sudo dnf install -y \
+  git curl wget unzip zip tar pkgconf-pkg-config perl python3 python3-pip \
+  gcc gcc-c++ gdb bison flex nasm yasm ninja-build \
+  libX11-devel libXext-devel libXft-devel libXmu-devel libXi-devel libXxf86vm-devel \
+  mesa-libGL-devel mesa-libGLU-devel glew-devel alsa-lib-devel \
+  pulseaudio-libs-devel gtk3-devel fontconfig-devel sqlite-devel \
+  libzip-devel openssl-devel libcurl-devel autoconf automake libtool
 ```
 
-在 Arch Linux 上运行：
+### 4.3 Arch 依赖
+
 ```bash
-sudo pacman -S nasm yasm
+sudo pacman -Syu --needed \
+  git curl wget unzip zip tar pkgconf perl python python-pip \
+  base-devel gcc gdb bison flex nasm yasm ninja cmake \
+  libx11 libxext libxft libxmu libxi libxxf86vm \
+  mesa glu glew alsa-lib libpulse gtk3 \
+  fontconfig sqlite libzip openssl curl autoconf automake libtool
 ```
 
-## 9. 验证工具安装
+### 4.4 Debian 说明
 
-在完成以上所有步骤后，请执行以下命令进行检查：
+Debian 大多数场景可沿用 Ubuntu 依赖清单。
+
+## 5. CMake 安装（系统包 vs pip vs snap vs 源码）
+
+### 5.1 方案对比
+
+| 方案 | 优点 | 风险 |
+| :--- | :--- | :--- |
+| 系统包 | 稳定、易维护 | 老版本可能偏旧 |
+| pip | 安装快 | PATH 可能冲突 |
+| snap | 获取新版方便 | 依赖 snapd |
+| 源码编译 | 灵活可控 | 编译耗时 |
+
+### 5.2 Ubuntu（Kitware APT）
 
 ```bash
-# 检查 CMake 版本
+sudo apt install -y gpg wget ca-certificates
+wget -O - https://apt.kitware.com/keys/kitware-archive-latest.asc 2>/dev/null \
+  | gpg --dearmor - \
+  | sudo tee /usr/share/keyrings/kitware-archive-keyring.gpg >/dev/null
+
+echo 'deb [signed-by=/usr/share/keyrings/kitware-archive-keyring.gpg] https://apt.kitware.com/ubuntu/ jammy main' \
+  | sudo tee /etc/apt/sources.list.d/kitware.list >/dev/null
+
+sudo apt update
+sudo apt install -y cmake
+```
+
+Ubuntu 24.04 请把 `jammy` 改为 `noble`。
+
+### 5.3 pip 安装
+
+```bash
+python3 -m pip install --user --upgrade cmake
+```
+
+### 5.4 snap 安装
+
+```bash
+sudo snap install cmake --classic
+```
+
+### 5.5 源码编译
+
+```bash
+wget https://github.com/Kitware/CMake/releases/download/v3.31.1/cmake-3.31.1.tar.gz
+tar -xzf cmake-3.31.1.tar.gz
+cd cmake-3.31.1
+./bootstrap
+make -j"$(nproc)"
+sudo make install
+```
+
+### 5.6 CMake 验证
+
+```bash
 cmake --version
+which cmake
+```
 
-# 检查 Ninja 版本
+## 6. Ninja 安装
+
+```bash
+# Ubuntu / Debian
+sudo apt install -y ninja-build
+
+# Fedora
+sudo dnf install -y ninja-build
+
+# Arch
+sudo pacman -S --needed ninja
+```
+
+验证：
+
+```bash
 ninja --version
+which ninja
+```
 
-# 检查 vcpkg
+## 7. vcpkg 安装和配置
+
+```bash
+git clone https://github.com/microsoft/vcpkg.git "$HOME/vcpkg"
+"$HOME/vcpkg"/bootstrap-vcpkg.sh
+```
+
+将以下内容写入 `~/.bashrc` 或 `~/.zshrc`：
+
+```bash
+export VCPKG_ROOT="$HOME/vcpkg"
+export PATH="$VCPKG_ROOT:$PATH"
+```
+
+生效与验证：
+
+```bash
+source ~/.bashrc
 vcpkg version
+test -f "$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" && echo "toolchain OK"
+```
 
-# 检查 Bison
+## 8. bison / flex 安装
+
+```bash
+# Ubuntu / Debian
+sudo apt install -y bison flex
+
+# Fedora
+sudo dnf install -y bison flex
+
+# Arch
+sudo pacman -S --needed bison flex
+```
+
+验证：
+
+```bash
 bison --version
+flex --version
+```
 
-# 检查 Python
+## 9. Python、NASM、YASM 安装
+
+```bash
+# Ubuntu / Debian
+sudo apt install -y python3 python3-pip nasm yasm
+
+# Fedora
+sudo dnf install -y python3 nasm yasm
+
+# Arch
+sudo pacman -S --needed python nasm yasm
+```
+
+验证：
+
+```bash
 python3 --version
+nasm --version
+yasm --version
+```
 
-# 检查 NASM
+## 10. 环境变量配置（.bashrc/.zshrc）
+
+推荐写入：
+
+```bash
+export VCPKG_ROOT="$HOME/vcpkg"
+export PATH="$VCPKG_ROOT:$HOME/.local/bin:$PATH"
+```
+
+生效并检查：
+
+```bash
+source ~/.bashrc
+echo "$VCPKG_ROOT"
+which vcpkg
+```
+
+## 11. WSL2 特殊注意事项
+
+- 仓库建议放 Linux 文件系统，不放 `/mnt/c`。
+- 脚本行尾保持 LF，权限报错时执行 `chmod +x`。
+
+## 12. Docker 开发环境（可选）
+
+```bash
+docker build -f dockers/linux.Dockerfile -t krkr2-linux-dev .
+docker run --rm -it -v "$(pwd)":/workspace/krkr2 -w /workspace/krkr2 krkr2-linux-dev bash
+```
+
+## 13. 验证命令清单
+
+```bash
+gcc --version
+cmake --version
+ninja --version
+vcpkg version
+bison --version
+flex --version
+python3 --version
 nasm --version
 ```
 
-## 10. 常见问题
+首次构建验证：
 
-- **缺少 dev 包**：在 Linux 下编译一些外部依赖时（特别是通过 vcpkg 编译），可能会遇到类似 `X11/Xlib.h not found` 的错误。这通常是因为缺少系统开发库。你可能需要安装 `libx11-dev`, `libxft-dev`, `libxext-dev` 等包。
-- **权限问题**：请尽量将 vcpkg 安装在用户主目录下（如 `~/vcpkg`），以避免在编译依赖时出现权限不足的问题。
+```bash
+cmake --preset="Linux Debug Config"
+cmake --build --preset="Linux Debug Build"
+```
 
-## 11. 练习题与答案
+## 14. 常见 Linux 环境问题
 
-1.  Linux 上通常预装了较旧版本的 CMake。如果 KR2 项目要求 CMake 3.31.1+，而你的 Ubuntu 系统自带的版本是 3.22，最推荐的升级方案是什么？
-2.  在 Linux 上设置 `VCPKG_ROOT` 环境变量时，通常是在哪个文件中进行的？如何使修改立即生效？
-3.  编译过程中提示 `yasm command not found`，你应该执行什么命令来修复？
+### 14.1 `X11/Xlib.h not found`
 
-<details>
-<summary>查看答案</summary>
+安装 `libx11-dev`（Fedora 为 `libX11-devel`）。
 
-1.  **回答**：最推荐的方案是使用 Kitware 官方维护的 PPA (Personal Package Archive)，因为它能通过 `apt` 直接获取官方最新的稳定版 CMake。另外，使用 Snap 镜像也是一种非常便捷且不会影响系统原有包管理的方案。
-2.  **回答**：
-    - 通常在用户家目录下的 `.bashrc`（针对 bash）或 `.zshrc`（针对 zsh）文件中添加 `export VCPKG_ROOT=$HOME/vcpkg`。
-    - 使其立即生效的命令是 `source ~/.bashrc`（或重启终端窗口）。
-3.  **回答**：执行 `sudo apt install yasm`（针对 Ubuntu/Debian 系统）或相应的包管理器安装命令。
+### 14.2 `GL/gl.h not found`
+
+安装 `libgl1-mesa-dev` 与 `libglu1-mesa-dev`。
+
+### 14.3 `pulse/pulseaudio.h not found`
+
+安装 `libpulse-dev`（Fedora 为 `pulseaudio-libs-devel`）。
+
+### 14.4 `Could not find CMAKE_MAKE_PROGRAM`
+
+安装 Ninja 并确认 `which ninja` 有输出。
+
+### 14.5 `Could not find toolchain file vcpkg.cmake`
+
+检查 `VCPKG_ROOT` 是否正确，确认 `scripts/buildsystems/vcpkg.cmake` 存在。
+
+## 15. 动手实践
+
+> 目标：完整跑通一次 Linux Debug 构建。
+
+```bash
+mkdir -p "$HOME/workspace"
+cd "$HOME/workspace"
+# 已 clone 可跳过
+# git clone <你的仓库地址>
+cd krkr2
+
+cmake --preset="Linux Debug Config"
+cmake --build --preset="Linux Debug Build"
+```
+
+## 16. 对照项目源码
+
+1. `krkr2/CMakePresets.json`：Linux preset、Ninja 生成器。
+2. `krkr2/vcpkg.json`：依赖清单、opencv4 override。
+3. `krkr2/.github/workflows/build-linux.yml`：CI Linux 依赖与构建流程。
+
+## 17. 本节小结
+
+- Linux 环境搭建要先读项目配置。
+- 发行版不同，但核心工具链流程一致。
+- CMake、Ninja、VCPKG_ROOT 是最关键检查点。
+
+## 18. 练习题与答案
+
+### 题目 1：为什么 Linux 必须安装 Ninja？
+<details><summary>查看答案</summary>
+
+Linux preset 指定 Ninja 为生成器，缺少 Ninja 会导致 configure 失败。
 
 </details>
 
+### 题目 2：出现 `X11/Xlib.h not found` 应安装什么？
+<details><summary>查看答案</summary>
 
-## 5. 安装 vcpkg
+安装 X11 开发包：Ubuntu/Debian 常用 `libx11-dev`，Fedora 常用 `libX11-devel`。
 
-1.  **克隆 vcpkg 仓库**：
-    ```bash
-    git clone https://github.com/microsoft/vcpkg.git ~/vcpkg
-    cd ~/vcpkg
-    ```
-2.  **引导 vcpkg**：
-    ```bash
-    ./bootstrap-vcpkg.sh
-    ```
-3.  **配置环境变量**：
-    将以下内容添加到你的 `~/.bashrc` 或 `~/.profile` 文件末尾：
-    ```bash
-    export VCPKG_ROOT=$HOME/vcpkg
-    export PATH=$VCPKG_ROOT:$PATH
-    ```
-    然后执行 `source ~/.bashrc` 使其立即生效。
+</details>
 
-## 6. 安装 bison 3.8.2+
+### 题目 3：`VCPKG_ROOT` 通常写在哪个文件？
+<details><summary>查看答案</summary>
 
-KR2 需要较新版本的 bison 工具。
+写在 `~/.bashrc` 或 `~/.zshrc`，保存后执行 `source` 立即生效。
 
-- **Ubuntu 22.04+**：
-    Ubuntu 22.04 自带的 bison 版本通常已经是 3.8.2，可以直接安装：
-    ```bash
-    sudo apt install bison flex
-    ```
-- **手动编译（如果版本过旧）**：
-    如果你的系统版本较低且没有高版本的 bison，可以从 GNU 官网下载源码并执行 `./configure && make && sudo make install`。
+</details>
 
-## 7. 安装 Python3
+## 19. 下一步
 
-大多数现代 Linux 发行版都预装了 Python 3。如果没装，请执行：
-
-```bash
-# Ubuntu/Debian
-sudo apt install python3 python3-pip
-
-# Fedora
-sudo dnf install python3
-
-# Arch Linux
-sudo pacman -S python
-```
-
-## 8. 安装 NASM 和 YASM
-
-为了支持一些库的汇编加速优化，我们需要安装这两个汇编器：
-
-```bash
-# Ubuntu/Debian
-sudo apt install nasm yasm
-
-# Fedora
-sudo dnf install nasm yasm
-
-# Arch Linux
-sudo pacman -S nasm yasm
-```
-
-
-## 3. 安装 CMake 3.31.1+
-
-Ubuntu 默认软件仓库中的 CMake 版本可能较旧。为了确保 KR2 能够正确构建，我们建议安装 3.31.1 或更新版本。
-
-- **方法 A（Kitware 官方 PPA，推荐）**：
-    ```bash
-    sudo apt install gpg wget
-    wget -O - https://apt.kitware.com/keys/kitware-archive-latest.asc 2>/dev/null | gpg --dearmor - | sudo tee /usr/share/keyrings/kitware-archive-keyring.gpg >/dev/null
-    echo 'deb [signed-by=/usr/share/keyrings/kitware-archive-keyring.gpg] https://apt.kitware.com/ubuntu/ jammy main' | sudo tee /etc/apt/sources.list.d/kitware.list >/dev/null
-    sudo apt update
-    sudo apt install cmake
-    ```
-- **方法 B（Snap 安装）**：
-    ```bash
-    sudo snap install cmake --classic
-    ```
-
-## 4. 安装 Ninja
-
-Ninja 在 Linux 上通常可以通过包管理器直接安装：
-
-```bash
-# Ubuntu/Debian
-sudo apt install ninja-build
-
-# Fedora
-sudo dnf install ninja-build
-
-# Arch Linux
-sudo pacman -S ninja
-```
+- [03-macOS环境搭建](./03-macOS环境搭建.md)

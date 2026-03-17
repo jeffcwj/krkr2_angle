@@ -1,169 +1,350 @@
 # 01-toolchain文件：将 vcpkg 注入 CMake
 
-在上一章中，我们已经学会了如何使用 vcpkg 安装各种库。但是，如果你现在直接打开一个 `CMakeLists.txt` 并写下 `find_package(fmt)`，CMake 仍然会告诉你找不到这个库。这是因为 CMake 默认只会在系统标准路径（如 `/usr/local` 或 Windows 的 `Program Files`）下搜索库，而不会主动去 vcpkg 的安装目录寻找。
+> **所属模块：** P02-vcpkg包管理 / 03-vcpkg与CMake集成
+>
+> **前置知识：** P02 前两章、P01 的 CMake 配置阶段基础
+>
+> **预计阅读时间：** 30-40 分钟
 
-为了让 CMake 意识到 vcpkg 的存在，我们需要用到 **CMake Toolchain File（工具链文件）**。
+## 本节目标
 
----
+读完本节后，你将能够：
 
-## 什么是 CMake Toolchain 文件？
+1. 解释 `CMAKE_TOOLCHAIN_FILE` 的作用与生效时机。
+2. 理解 vcpkg toolchain 的核心工作机制。
+3. 使用命令行、Preset、环境变量设置 toolchain。
+4. 理解 `VCPKG_CHAINLOAD_TOOLCHAIN_FILE` 叠加机制。
+5. 分析 KrKr2 的 `cmake/vcpkg_android.cmake` 实际写法。
+6. 写出最小可维护的自定义 toolchain 示例。
 
-CMake 工具链文件是一个 `.cmake` 脚本，它在 CMake 配置阶段（Configure）的最早期被加载。它的主要作用是告诉 CMake：
-1. 使用哪个编译器（C/C++ 编译器路径）。
-2. 目标平台是什么（Android、iOS、Windows 等）。
-3. **在哪里寻找依赖库和头文件。**
+## 为什么 `find_package` 会找不到 vcpkg 安装的库
 
-vcpkg 正是通过提供一个通用的工具链文件，在 CMake 寻找库之前，预先将 vcpkg 的安装路径注入到 CMake 的搜索变量中。
+你已经会用 vcpkg 安装依赖。
+但 CMake 默认并不知道 vcpkg 的安装目录。
 
-这个神奇的文件位于：`$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake`。
+默认情况下，CMake 优先搜索系统路径与编译器默认路径，
+不会自动扫描 `vcpkg_installed/<triplet>`。
 
----
+因此核心问题不是“库没装”，
+而是“搜索上下文没被正确注入”。
 
-## 设置 Toolchain 的三种方式
+## CMake toolchain 文件基础概念（`CMAKE_TOOLCHAIN_FILE`）
 
-要让项目使用 vcpkg，你需要确保 CMake 在启动时加载了上述文件。以下是三种最常用的设置方法：
+`CMAKE_TOOLCHAIN_FILE` 是一个缓存变量，
+值是 `.cmake` 脚本路径。
 
-### 1. 命令行参数（最直接）
+该脚本在配置早期加载，主要负责：
 
-在调用 `cmake` 命令进行配置时，手动传入 `-DCMAKE_TOOLCHAIN_FILE` 参数。
+1. 指定目标平台与架构。
+2. 指定编译器和 sysroot。
+3. 指定查找策略。
+4. 注入外部依赖前缀。
 
-**Windows:**
-```powershell
-cmake -B build -S . -DCMAKE_TOOLCHAIN_FILE="C:/vcpkg/scripts/buildsystems/vcpkg.cmake"
-```
+简化理解：
 
-**Linux / macOS:**
+- `CMakeLists.txt` 决定构建目标。
+- toolchain 决定构建环境。
+
+## vcpkg 的 toolchain 文件工作原理
+
+vcpkg 入口文件：
+
+`$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake`
+
+它的核心不是替代业务 CMake，
+而是让 CMake 在 `find_package` 前拿到正确依赖路径信息。
+
+它通常会做这些事：
+
+1. 读取 `VCPKG_TARGET_TRIPLET`。
+2. 注入 vcpkg 安装前缀到搜索变量。
+3. 调整包查找优先级。
+4. 支持 manifest 场景。
+5. 支持 chainload 叠加其他 toolchain。
+
+## `CMAKE_TOOLCHAIN_FILE` 设置方式
+
+### 方式一：命令行
+
 ```bash
-cmake -B build -S . -DCMAKE_TOOLCHAIN_FILE="$HOME/vcpkg/scripts/buildsystems/vcpkg.cmake"
+cmake -S . -B out/linux/debug \
+  -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" \
+  -DVCPKG_TARGET_TRIPLET=x64-linux
 ```
 
-> **注意**：路径必须使用正斜杠 `/`，或者在 Windows 上对反斜杠进行转义。
+Windows PowerShell：
 
-### 2. CMakePresets.json 中设置（推荐）
+```powershell
+cmake -S . -B out/windows/debug `
+  -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" `
+  -DVCPKG_TARGET_TRIPLET="x64-windows-static-md"
+```
 
-这是现代 CMake 项目（包括 KrKr2）的标准做法。在 `CMakePresets.json` 的 `configurePresets` 中指定工具链文件路径。
+### 方式二：Preset（推荐）
 
 ```json
 {
-  "version": 3,
+  "version": 6,
   "configurePresets": [
     {
-      "name": "default",
-      "binaryDir": "${sourceDir}/build",
+      "name": "linux-debug",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/out/linux/debug",
       "cacheVariables": {
-        "CMAKE_TOOLCHAIN_FILE": {
-          "type": "FILEPATH",
-          "value": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake"
-        }
+        "CMAKE_TOOLCHAIN_FILE": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
+        "VCPKG_TARGET_TRIPLET": "x64-linux"
       }
     }
   ]
 }
 ```
 
-这种方式的好处是，团队成员只需要设置好 `VCPKG_ROOT` 环境变量，IDE（如 VS Code 或 Visual Studio）就能自动识别并加载工具链。
+### 方式三：环境变量配合
 
-### 3. vcpkg 2024+ 自动检测
-
-在 2024 年以后的版本中，如果你的环境变量中设置了 `VCPKG_ROOT`，并且在项目的 `CMakeLists.txt` 的 `project()` 命令之前没有手动设置工具链，CMake 有时会自动尝试寻找。但为了稳定性，**强烈建议显式指定工具链文件**。
-
----
-
-## VCPKG_TARGET_TRIPLET 的作用
-
-我们在 vcpkg 基础中提到过 Triplet（三元组），它决定了库的编译架构和链接方式。在 CMake 中，vcpkg 工具链会自动识别你的系统并选择默认 Triplet。
-
-如果你想强制指定，可以通过 `-DVCPKG_TARGET_TRIPLET` 设置：
-
-- **Windows 静态链接 (MD)**: `x64-windows-static-md`（KrKr2 默认使用此设置，避免发布时缺少 DLL）
-- **Linux**: `x64-linux`
-- **macOS**: `arm64-osx` 或 `x64-osx`
-
-在 `CMakePresets.json` 中设置示例：
-```json
-"cacheVariables": {
-  "VCPKG_TARGET_TRIPLET": "x64-windows-static-md"
-}
+```bash
+export VCPKG_ROOT=/opt/vcpkg
+cmake -S . -B out/linux/release \
+  -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake"
 ```
 
----
+## toolchain 内部做了什么
 
-## Android 的特殊情况：双工具链叠加
+流程可简化为：
 
-在开发 Android 版 KrKr2 时，我们会遇到一个难题：
-- Android 开发必须使用 Android NDK 提供的工具链（`android.toolchain.cmake`）。
-- 使用 vcpkg 库又必须使用 vcpkg 的工具链（`vcpkg.cmake`）。
+```mermaid
+flowchart TD
+    A[configure 启动] --> B[加载 toolchain]
+    B --> C[识别 triplet]
+    C --> D[注入搜索路径]
+    D --> E[find_package]
+    E --> F[导出目标传播 include/link]
+```
 
-CMake 官方只允许设置 **一个** `CMAKE_TOOLCHAIN_FILE`。为了解决冲突，vcpkg 提供了一个 **Chainload（链式加载）** 机制。
-
-### VCPKG_CHAINLOAD_TOOLCHAIN_FILE 机制
-
-我们可以将 vcpkg 工具链设为主工具链，然后告诉 vcpkg：“在你干完活之后，再去加载 Android 的工具链”。
-
-在 KrKr2 项目中，我们编写了一个专门的脚本 `cmake/vcpkg_android.cmake` 来处理逻辑。其核心逻辑如下：
+业务 CMake 示例：
 
 ```cmake
-# cmake/vcpkg_android.cmake 逻辑详解
-
-# 1. 检查环境变量
-if(NOT DEFINED ENV{ANDROID_NDK_HOME})
-    message(FATAL_ERROR "请设置 ANDROID_NDK_HOME 环境变量")
-endif()
-
-if(NOT DEFINED ENV{VCPKG_ROOT})
-    message(FATAL_ERROR "请设置 VCPKG_ROOT 环境变量")
-endif()
-
-# 2. 根据 CMake 传入的 ANDROID_ABI 映射到 vcpkg 的 Triplet
-if(ANDROID_ABI STREQUAL "arm64-v8a")
-    set(VCPKG_TARGET_TRIPLET "arm64-android")
-elseif(ANDROID_ABI STREQUAL "armeabi-v7a")
-    set(VCPKG_TARGET_TRIPLET "arm-android")
-elseif(ANDROID_ABI STREQUAL "x86_64")
-    set(VCPKG_TARGET_TRIPLET "x64-android")
-elseif(ANDROID_ABI STREQUAL "x86")
-    set(VCPKG_TARGET_TRIPLET "x86-android")
-endif()
-
-# 3. 核心步骤：设置链式加载
-# 让 vcpkg 去加载 NDK 的工具链
-set(VCPKG_CHAINLOAD_TOOLCHAIN_FILE "$ENV{ANDROID_NDK_HOME}/build/cmake/android.toolchain.cmake" CACHE STRING "")
-
-# 4. 将主工具链指向 vcpkg
-set(CMAKE_TOOLCHAIN_FILE "$ENV{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake" CACHE STRING "")
+find_package(fmt CONFIG REQUIRED)
+add_executable(demo main.cpp)
+target_link_libraries(demo PRIVATE fmt::fmt)
 ```
 
-通过这种方式，Android 构建系统既能识别 NDK 的编译器配置，又能正常使用 vcpkg 安装的库。
+## `VCPKG_TARGET_TRIPLET` 的作用
 
----
+triplet 决定平台、架构和链接策略。
+
+常见值：
+
+- `x64-windows-static-md`
+- `x64-linux`
+- `arm64-osx`
+- `arm64-android`
+
+triplet 错误会导致找包失败或架构不匹配。
+
+## 叠加 toolchain：`VCPKG_CHAINLOAD_TOOLCHAIN_FILE`
+
+Android 需要 NDK toolchain，
+同时也需要 vcpkg toolchain。
+
+由于 `CMAKE_TOOLCHAIN_FILE` 只能有一个，
+因此采用 chainload：
+
+```cmake
+set(CMAKE_TOOLCHAIN_FILE "$ENV{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake" CACHE FILEPATH "")
+set(VCPKG_CHAINLOAD_TOOLCHAIN_FILE "$ENV{ANDROID_NDK_HOME}/build/cmake/android.toolchain.cmake" CACHE FILEPATH "")
+```
+
+## Android NDK + vcpkg：KrKr2 实际用法
+
+`krkr2/cmake/vcpkg_android.cmake`（99 行）可以分四段：
+
+1. 入口开关：`if (VCPKG_TARGET_ANDROID)`。
+2. 环境变量检查：`ANDROID_NDK_HOME` 与 `VCPKG_ROOT`。
+3. ABI 映射 triplet。
+4. 设置主从 toolchain。
+
+ABI 映射表：
+
+| ANDROID_ABI | VCPKG_TARGET_TRIPLET |
+|---|---|
+| arm64-v8a | arm64-android |
+| armeabi-v7a | arm-android |
+| x86_64 | x64-android |
+| x86 | x86-android |
+
+## 交叉编译注意事项
+
+1. 每个平台独立 build 目录。
+2. 不要在 `project()` 后设置 toolchain。
+3. Android 下保证 `ANDROID_ABI`、`ANDROID_PLATFORM`、triplet 一致。
+4. 优先使用 `find_package(Pkg CONFIG REQUIRED)`。
+
+## 自定义 toolchain 编写指南
+
+最小示例：
+
+```cmake
+# cmake/toolchains/linux-aarch64.cmake
+set(CMAKE_SYSTEM_NAME Linux)
+set(CMAKE_SYSTEM_PROCESSOR aarch64)
+set(CMAKE_C_COMPILER /opt/gcc-aarch64/bin/aarch64-linux-gnu-gcc)
+set(CMAKE_CXX_COMPILER /opt/gcc-aarch64/bin/aarch64-linux-gnu-g++)
+set(CMAKE_SYSROOT /opt/sysroots/aarch64-linux-gnu)
+set(CMAKE_FIND_ROOT_PATH /opt/sysroots/aarch64-linux-gnu)
+set(CMAKE_FIND_ROOT_PATH_MODE_PACKAGE ONLY)
+set(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY ONLY)
+set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY)
+set(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM NEVER)
+```
+
+Android 叠加调用示例：
+
+```bash
+cmake -S . -B out/android/arm64-v8a/debug \
+  -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" \
+  -DVCPKG_CHAINLOAD_TOOLCHAIN_FILE="$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake" \
+  -DANDROID_ABI=arm64-v8a \
+  -DVCPKG_TARGET_TRIPLET=arm64-android
+```
+
+最小验证工程：
+
+```cmake
+cmake_minimum_required(VERSION 3.28)
+project(toolchain_demo LANGUAGES CXX)
+set(CMAKE_CXX_STANDARD 17)
+find_package(fmt CONFIG REQUIRED)
+add_executable(toolchain_demo main.cpp)
+target_link_libraries(toolchain_demo PRIVATE fmt::fmt)
+```
+
+```cpp
+#include <fmt/core.h>
+int main() { fmt::print("toolchain demo ok\n"); return 0; }
+```
+
+## KrKr2 项目 toolchain 配置分析
+
+优点：
+
+1. 开关明确。
+2. 失败前置。
+3. 映射透明。
+4. 叠加规范。
+
+可优化：
+
+1. 错误信息可补充四平台示例。
+2. 增加 `ANDROID_PLATFORM` 合法性检查。
+
+## 动手实践
+
+### 步骤 1：设置环境变量
+
+```bash
+export VCPKG_ROOT=$HOME/dev/vcpkg
+export ANDROID_NDK_HOME=$HOME/Android/Sdk/ndk/26.3.11579264
+```
+
+Windows PowerShell：
+
+```powershell
+$env:VCPKG_ROOT="C:/dev/vcpkg"
+$env:ANDROID_NDK_HOME="C:/Android/Sdk/ndk/26.3.11579264"
+```
+
+### 步骤 2：配置桌面构建
+
+```bash
+cmake -S . -B out/linux/debug \
+  -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" \
+  -DVCPKG_TARGET_TRIPLET=x64-linux
+```
+
+### 步骤 3：配置 Android 构建
+
+```bash
+cmake -S . -B out/android/arm64-v8a/debug \
+  -DVCPKG_TARGET_ANDROID=ON \
+  -DANDROID_ABI=arm64-v8a
+```
+
+### 步骤 4：检查缓存
+
+确认 `CMakeCache.txt` 包含：
+
+- `CMAKE_TOOLCHAIN_FILE`
+- `VCPKG_CHAINLOAD_TOOLCHAIN_FILE`
+- `VCPKG_TARGET_TRIPLET`
+
+### 步骤 5：执行构建
+
+```bash
+cmake --build out/android/arm64-v8a/debug --target krkr2
+```
+
+## 对照项目源码
+
+- `krkr2/cmake/vcpkg_android.cmake` 第 20-99 行：Android 叠加逻辑。
+- `krkr2/docs/P02-vcpkg包管理/03-vcpkg与CMake集成/01-toolchain文件.md`：本节教程。
+
+## 本节小结
+
+- `CMAKE_TOOLCHAIN_FILE` 是配置入口级变量。
+- vcpkg toolchain 核心是路径注入与查找重定向。
+- Android 叠加依赖 `VCPKG_CHAINLOAD_TOOLCHAIN_FILE`。
+- KrKr2 的脚本结构可直接复用到同类项目。
 
 ## 练习题与答案
 
-### 题目 1：在 Windows 上，如果你希望 CMake 项目使用 vcpkg 且不生成动态库（即使用静态链接），你应该如何设置命令行的参数？
+### 题目 1：为什么 `project()` 之后设置 toolchain 通常无效？
 
 <details>
 <summary>查看答案</summary>
 
-你需要同时指定工具链文件和目标 Triplet。假设 `VCPKG_ROOT` 已设置：
+因为 toolchain 必须在配置早期参与编译器和平台初始化。
+`project()` 之后再改值通常不会触发完整重初始化。
 
-```powershell
-cmake -B build -S . `
-  -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" `
-  -DVCPKG_TARGET_TRIPLET="x64-windows-static"
+</details>
+
+### 题目 2：Android 场景下 `ANDROID_ABI`、triplet、chainload 各自作用是什么？
+
+<details>
+<summary>查看答案</summary>
+
+- `ANDROID_ABI`：目标 ABI。
+- `VCPKG_TARGET_TRIPLET`：依赖二进制架构与平台。
+- `VCPKG_CHAINLOAD_TOOLCHAIN_FILE`：叠加 NDK toolchain。
+
+</details>
+
+### 题目 3：写出 Linux Debug + vcpkg + x64-linux 的配置命令。
+
+<details>
+<summary>查看答案</summary>
+
+```bash
+cmake -S . -B out/linux/debug \
+  -DCMAKE_BUILD_TYPE=Debug \
+  -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" \
+  -DVCPKG_TARGET_TRIPLET=x64-linux
 ```
 
-注意：在 KrKr2 中，由于 Cocos2d-x 的特殊需求，我们通常使用 `x64-windows-static-md`。
-
 </details>
 
-### 题目 2：为什么 Android 开发需要使用 `VCPKG_CHAINLOAD_TOOLCHAIN_FILE` 而不是直接设置 `CMAKE_TOOLCHAIN_FILE` 为 NDK 的路径？
+### 题目 4：为何 `vcpkg_android.cmake` 先检查环境变量？
 
 <details>
 <summary>查看答案</summary>
 
-1. CMake 只能接受一个 `CMAKE_TOOLCHAIN_FILE`。
-2. 如果直接设为 NDK 路径，CMake 就不知道去哪里找 vcpkg 安装的库。
-3. 如果直接设为 vcpkg 路径，CMake 就不知道如何交叉编译 Android 程序（找不到 NDK 的编译器和系统头文件）。
-4. 使用 `VCPKG_CHAINLOAD_TOOLCHAIN_FILE` 可以让 vcpkg 充当“代理”，它在完成自己的路径注入任务后，会加载并执行 NDK 的工具链逻辑，从而实现两者的并存。
+因为 ABI 映射和 toolchain 路径都依赖环境变量。
+先检查可在入口快速失败，减少排查成本。
 
 </details>
+
+## 下一步
+
+继续学习：[02-find_package用法.md](./02-find_package用法.md)
+
+下一节将深入讲 `find_package` 的 CONFIG/MODULE 两种模式，
+并结合 KrKr2 真实依赖给出链接实践。

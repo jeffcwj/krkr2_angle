@@ -1,144 +1,282 @@
 # Ninja 简介与安装
 
-> **所属模块：** P01-现代 CMake 与构建工具链
-> **前置知识：** 第 4 章全部（CMake 基础、变量、目标、CMakePresets）
-> **预计阅读时间：** 15 分钟
+## 元数据块
+
+> **所属模块：** P01-现代 CMake 与构建工具链  
+> **章节位置：** 第 5 章第 1 节（Ninja 构建后端）  
+> **前置知识：** 第 4 章全部（CMake 基础、变量、目标、CMakePresets）  
+> **适用平台：** Windows / Linux / macOS / CI 环境  
+> **预计阅读时间：** 12 分钟  
+> **本节产出：** 完成 Ninja 安装、验证、常用命令实操并理解 KrKr2 默认选择原因
 
 ## 本节目标
+
 读完本节后，你将能够：
-1. 理解 Ninja 的定位以及它与 CMake 的关系。
-2. 掌握 Ninja 相比于传统 Make 的核心优势。
-3. 在 Windows、Linux、macOS、Android 平台上完成 Ninja 的安装与验证。
-4. 了解 KrKr2 项目选择 Ninja 作为统一构建后端的原因。
+
+1. 解释 Ninja 的诞生背景与 Chromium 项目关系。
+2. 对比 Ninja 与 Make 在启动时间上的差异。
+3. 对比 Ninja 与 Make 在增量构建上的差异。
+4. 对比 Ninja 与 Make 在并行化上的差异。
+5. 理解 Ninja 的设计哲学与使用边界。
+6. 在 Windows、Linux、macOS、CI 环境安装 Ninja。
+7. 使用完整命令链验证 Ninja 安装结果。
+8. 理解 `build.ninja` 的 `rule`、`build`、`default`。
+9. 使用 `ninja -j`、`ninja -v`、`ninja -t targets`、`ninja -t deps`、`ninja -t clean`。
+10. 说明 KrKr2 项目为什么默认使用 Ninja。
 
 ## 什么是 Ninja
-Ninja 是由 Google 工程师开发的轻量级构建工具（Build System），它的口号是“专注于速度”。在 C++ 项目开发中，它通常扮演“构建后端”（Build Backend）的角色。
 
-我们可以用建筑施工来打个比方：
-* **CMake 是“建筑设计师”：** 它负责绘制蓝图。你通过编写 `CMakeLists.txt` 来告诉它有哪些源文件、库依赖、编译选项。CMake 会根据你的环境（Windows 还是 Linux），把蓝图翻译成“施工方案”。
-* **Ninja 是“施工队”：** 它不关心如何设计，只负责盯着蓝图，以最快的速度把砖头（源文件）垒成大楼（可执行文件）。
+Ninja 是一个以执行速度为核心目标的构建工具。
+它通常与 CMake 等生成器配合使用，而不是独立承担复杂工程表达。
 
-Ninja 的设计初衷是为了解决大型项目（如 Chromium 或 LLVM）中构建速度缓慢的问题。它只做一件事：高效地执行构建命令，并跟踪文件依赖关系。
+典型流程是：
 
-## Ninja vs Make
-在 Unix 系平台上，Make 是历史悠久的构建工具。虽然 CMake 默认在 Linux 上生成 Makefile，但在现代开发中，Ninja 已经逐渐取代了 Make 的地位。
+1. 使用 `CMakeLists.txt` 定义工程。
+2. CMake 生成 `build.ninja`。
+3. Ninja 读取并执行构建命令。
 
-| 特性 | Make | Ninja |
-| :--- | :--- | :--- |
-| **设计目标** | 通用、功能丰富（支持复杂逻辑） | 简单、极速（专为机器生成设计） |
-| **启动速度** | 慢（需要解析复杂的 Makefile） | 极快（几乎瞬间启动） |
-| **增量构建** | 随项目规模变大而变慢 | 即使是万级文件，检查更新也只需零点几秒 |
-| **并行处理** | 需要手动指定 `-j` 参数 | 默认根据 CPU 核心数自动并行构建 |
-| **平台支持** | 主要针对 Unix/POSIX | 跨平台一致性极佳（Win/Linux/Mac） |
+这个分工中：
 
-Ninja 为什么比 Make 快？
-1. **最小化 I/O：** Ninja 在构建开始前会构建一个极其精简的依赖图，减少磁盘读取次数。
-2. **零逻辑：** Ninja 不支持条件判断或复杂的脚本逻辑。这些复杂的“脑力活”都交给了 CMake 处理。Ninja 只需无脑执行命令。
-3. **高效的依赖检查：** Ninja 使用极快的时间戳对比算法来决定哪些文件需要重编。
+- CMake 负责描述和生成。
+- Ninja 负责执行和加速。
 
-## Ninja vs MSBuild vs Xcode
-如果你在 Windows 上使用 Visual Studio，默认会使用 MSBuild；在 macOS 上使用 Xcode，默认会使用 Xcode 构建系统。
+## Ninja 的诞生背景
 
-虽然这些原生系统对特定 IDE 支持很好，但在跨平台开发（如 KrKr2）中，它们存在以下问题：
-* **行为不统一：** 同样的工程在 Windows 和 Mac 上的构建逻辑可能因为构建器的差异而产生细微不同。
-* **速度劣势：** 对于大型 C++ 项目，Ninja 的调度性能通常优于 MSBuild。
-* **CI 环境统一：** 在自动化构建（CI/CD）服务器上，统一使用 Ninja 可以让脚本更加简洁且易于维护。
+Ninja 起源于 Google 工程实践。
+其核心动机是解决 Chromium 超大工程中的构建效率问题。
 
-## 四平台安装指南
+Chromium 场景具有典型特征：
 
-### 1. Windows 平台
-在 Windows 上安装 Ninja 有多种快捷方式：
+1. 文件和目标规模很大。
+2. 增量构建频率很高。
+3. 需要更高效利用多核并行。
 
-* **方式 A: winget (推荐)**
-  ```bash
-  winget install Ninja-build.Ninja
-  ```
-* **方式 B: scoop**
-  ```bash
-  scoop install ninja
-  ```
-* **方式 C: Chocolatey**
-  ```bash
-  choco install ninja
-  ```
-* **方式 D: 手动安装**
-  1. 访问 [Ninja GitHub Releases](https://github.com/ninja-build/ninja/releases)。
-  2. 下载 `ninja-win.zip`，解压得到 `ninja.exe`。
-  3. 将 `ninja.exe` 所在的文件夹路径添加到系统的 `PATH` 环境变量中。
+Ninja 通过极简输入和低开销执行路径，降低启动和调度成本。
+因此它不是“功能最多”，而是“执行最快”类型的构建后端。
 
-### 2. Linux 平台
-根据你的发行版选择相应的包管理器：
+## Ninja vs Make：启动、增量、并行
 
-* **Ubuntu / Debian / Linux Mint:**
-  ```bash
-  sudo apt update
-  sudo apt install ninja-build
-  ```
-* **Fedora / RHEL / CentOS:**
-  ```bash
-  sudo dnf install ninja-build
-  ```
-* **Arch Linux:**
-  ```bash
-  sudo pacman -S ninja
-  ```
+| 维度 | Make | Ninja | 影响 |
+| :--- | :--- | :--- | :--- |
+| 启动时间 | 解析通常更重 | 启动更轻 | 小改动反馈更快 |
+| 增量构建 | 大项目检查成本上升 | 判定路径更短 | 迭代更顺畅 |
+| 并行化 | 常需更多手动调优 | 调度开销低 | 多核利用更高 |
 
-### 3. macOS 平台
-推荐使用 Homebrew 安装：
+## Ninja 的设计哲学
+
+Ninja 的核心哲学是：
+
+**复杂逻辑放在生成阶段，执行阶段只做快速调度。**
+
+因此：
+
+1. 不建议手写复杂 `build.ninja`。
+2. 建议通过 CMake 生成 Ninja 文件。
+3. 条件分支与平台逻辑应放在 CMake 阶段。
+
+## 四平台安装方式
+
+### Windows（winget / scoop / 手动）
+
+#### winget
+
 ```bash
+winget install Ninja-build.Ninja
+```
+
+#### scoop
+
+```bash
+scoop install ninja
+```
+
+#### 手动安装
+
+1. 访问 `https://github.com/ninja-build/ninja/releases`。
+2. 下载 `ninja-win.zip`。
+3. 解压得到 `ninja.exe`。
+4. 把目录加入系统 `PATH`。
+5. 重新打开终端执行 `ninja --version`。
+
+### Linux（apt / dnf / pacman / 源码）
+
+#### Debian / Ubuntu / Linux Mint
+
+```bash
+sudo apt update
+sudo apt install -y ninja-build
+```
+
+#### Fedora / RHEL / CentOS Stream
+
+```bash
+sudo dnf install -y ninja-build
+```
+
+#### Arch / Manjaro
+
+```bash
+sudo pacman -S --noconfirm ninja
+```
+
+#### 源码安装
+
+```bash
+git clone https://github.com/ninja-build/ninja.git
+cd ninja
+python3 configure.py --bootstrap
+sudo install -m 755 ninja /usr/local/bin/ninja
+```
+
+### macOS（Homebrew）
+
+```bash
+brew update
 brew install ninja
 ```
 
-### 4. Android 平台
-如果你在进行移动端开发，通常不需要手动安装 Ninja。Android NDK（Native Development Kit）内置了 Ninja 副本。当你使用 Android Studio 或 CMake 交叉编译时，它会自动调用。
+### CI 环境（GitHub Actions / GitLab CI / Jenkins）
 
-### 5. 验证安装
-在任意终端（Command Prompt, PowerShell, Bash）中输入：
+#### GitHub Actions
+
+```yaml
+- name: Install Ninja
+  run: |
+    sudo apt update
+    sudo apt install -y ninja-build
+    ninja --version
+```
+
+#### GitLab CI
+
+```yaml
+before_script:
+  - apt-get update
+  - apt-get install -y ninja-build cmake
+  - ninja --version
+```
+
+#### Jenkins Linux Agent
+
 ```bash
+sudo apt update
+sudo apt install -y ninja-build
 ninja --version
 ```
-如果你看到类似 `1.11.1` 的版本号，说明安装成功。
 
-## Ninja 文件格式简介
-虽然我们不需要手动编写 Ninja 脚本（因为 CMake 会为我们代劳），但了解它的基本结构能帮你更好地调试。
+### Android 补充
 
-Ninja 的主配置文件通常叫作 `build.ninja`。它的语法非常直接：
+Android NDK 常包含 Ninja，默认 Android Studio 流程中通常无需单独安装。
 
-```ninja
-# 定义一个变量
-cxx = g++
-cflags = -Wall -O2
+## 验证安装：完整命令链
 
-# 定义一个构建规则（Rule）
-rule compile
-  command = $cxx $cflags -c $in -o $out
-  description = Compiling $in...
+### Windows PowerShell
 
-# 定义一个构建目标（Build Statement）
-build main.o: compile main.cpp
-
-# 定义最终生成物
-rule link
-  command = $cxx $in -o $out
-
-build my_app: link main.o
+```powershell
+ninja --version
+Get-Command ninja
+cmake --version
+cmake -G Ninja -S . -B build\verify-ninja
+cmake --build build\verify-ninja -v
 ```
 
-这段简单的代码展示了 Ninja 的三大核心概念：
-1. **Variables（变量）：** 用来存储通用的设置。
-2. **Rules（规则）：** 告诉 Ninja 如何执行具体的命令。
-3. **Build Statements（构建声明）：** 明确具体的输入文件和输出文件。
+### Linux / macOS / CI Shell
 
-因为这种格式极其扁平，Ninja 能够以闪电般的速度加载它，这正是它快过 Make 的秘诀之一。
+```bash
+ninja --version
+command -v ninja
+cmake --version
+cmake -G Ninja -S . -B build/verify-ninja
+cmake --build build/verify-ninja -v
+```
 
-## 为什么 KrKr2 选择 Ninja
-在 KrKr2 项目中，我们坚持使用 Ninja 作为核心构建后端。原因如下：
+通过标准：
 
-1. **跨平台体验一致：** 无论你在 Windows、Linux 还是 Mac 上，输入同样的 `ninja` 命令都能得到一致的结果。
-2. **极速的增量构建：** 在开发过程中，我们经常只修改一个源文件。Ninja 可以在毫秒级判断出只需重编这一个文件，让反馈周期大幅缩短。
-3. **原生支持 CMakePresets：** 我们所有的预设文件 `CMakePresets.json` 都默认配置了 `"generator": "Ninja"`。
+1. 能输出 Ninja 版本号。
+2. 能定位 Ninja 可执行路径。
+3. CMake 能生成 Ninja 构建目录。
+4. Ninja 能完成真实构建。
 
-你可以查看 KrKr2 的根目录下的 `CMakePresets.json`，你会看到类似这样的代码：
+## `build.ninja` 文件结构简介
+
+```ninja
+cxx = g++
+cflags = -Wall -Wextra -O2
+
+rule compile
+  command = $cxx $cflags -MMD -MF $out.d -c $in -o $out
+  depfile = $out.d
+  description = CXX $out
+
+rule link
+  command = $cxx $in -o $out
+  description = LINK $out
+
+build main.o: compile main.cpp
+build app: link main.o
+
+default app
+```
+
+### `rule`
+
+定义命令模板。
+
+### `build`
+
+定义输入输出依赖关系。
+
+### `default`
+
+定义默认构建目标。
+
+## Ninja 常用命令
+
+### `ninja -j`
+
+```bash
+ninja -j 8
+```
+
+### `ninja -v`
+
+```bash
+ninja -v
+```
+
+### `ninja -t targets`
+
+```bash
+ninja -t targets
+```
+
+### `ninja -t deps`
+
+```bash
+ninja -t deps
+```
+
+### `ninja -t clean`
+
+```bash
+ninja -t clean
+```
+
+## KrKr2 项目为什么默认选择 Ninja
+
+KrKr2 构建系统的核心诉求是：
+
+1. 跨平台行为一致。
+2. 增量构建反馈快。
+
+Ninja 在这两点上表现稳定：
+
+1. Windows、Linux、macOS、CI 命令入口统一。
+2. 小改动迭代速度快。
+3. 本地与 CI 差异更小。
+4. 与 CMakePresets 配合自然。
+
+示例：
 
 ```json
 {
@@ -147,39 +285,115 @@ build my_app: link main.o
     {
       "name": "windows-base",
       "generator": "Ninja",
-      "binaryDir": "${sourceDir}/build/${presetName}",
-      "condition": {
-        "type": "equals",
-        "lhs": "${hostSystemName}",
-        "rhs": "Windows"
-      }
+      "binaryDir": "${sourceDir}/build/${presetName}"
     }
   ]
 }
 ```
 
-这意味着你不再需要纠结到底是用 Visual Studio 2022 还是 Makefile。在 KrKr2 的世界里，Ninja 就是我们的官方语言。
+## 动手实践
+
+### 步骤 1：创建目录结构
+
+```text
+ninja-demo/
+├── CMakeLists.txt
+└── main.cpp
+```
+
+### 步骤 2：编写 `main.cpp`
+
+```cpp
+#include <iostream>
+
+int main() {
+    std::cout << "Hello Ninja Tutorial" << std::endl;
+    return 0;
+}
+```
+
+### 步骤 3：编写 `CMakeLists.txt`
+
+```cmake
+cmake_minimum_required(VERSION 3.20)
+project(ninja_demo LANGUAGES CXX)
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+add_executable(ninja_demo main.cpp)
+```
+
+### 步骤 4：配置并构建
+
+```bash
+cmake -G Ninja -S . -B build
+cmake --build build -v
+```
+
+### 步骤 5：运行程序
+
+Windows：
+
+```powershell
+.\build\ninja_demo.exe
+```
+
+Linux/macOS：
+
+```bash
+./build/ninja_demo
+```
+
+### 步骤 6：观察增量构建
+
+1. 修改输出文本。
+2. 重新执行 `cmake --build build -v`。
+3. 观察仅受影响文件重编译。
 
 ## 本节小结
-本节中，你了解了 Ninja 作为一个高速构建工具的定位，它与 CMake 的“设计者-施工者”关系，以及它在性能上对传统工具的超越。你已经在各个平台上成功安装了它。
+
+- Ninja 来自 Chromium 大型工程的效率需求。
+- 相比 Make，Ninja 在启动、增量、并行上更偏重执行效率。
+- Ninja 更适合作为后端执行器，而非复杂脚本前端。
+- 你已掌握四平台安装和完整验证命令链。
+- 你已掌握 `build.ninja` 结构与常用命令。
+- 你已理解 KrKr2 默认选择 Ninja 的工程化原因。
 
 ## 练习题与答案
 
-### 题目 1：Ninja 与 CMake 之间是什么关系？
-<details><summary>查看答案</summary>
-CMake 是构建生成器（Meta-Build System），负责根据 `CMakeLists.txt` 生成构建脚本。Ninja 是构建执行器（Build System），负责解析构建脚本并调用编译器（如 cl.exe, g++, clang++）完成实际的构建任务。
+### 题目 1：为什么 Ninja 与 Chromium 场景高度匹配？
+
+<details>
+<summary>查看答案</summary>
+
+Chromium 工程规模大、增量构建频繁、并行需求高。Ninja 通过低开销调度和简洁执行路径降低等待时间，因此更匹配这类场景。
+
 </details>
 
-### 题目 2：在 Windows 上，如果你手动下载了 `ninja.exe` 但在终端运行 `ninja --version` 提示命令找不到，最可能的原因是什么？
-<details><summary>查看答案</summary>
-原因是你没有将 `ninja.exe` 所在的文件夹路径添加到系统的 `PATH` 环境变量中。只有添加后，系统才能在任何目录下识别出 `ninja` 这个命令。
+### 题目 2：`build.ninja` 中 `rule`、`build`、`default` 的作用分别是什么？
+
+<details>
+<summary>查看答案</summary>
+
+`rule` 定义命令模板，`build` 定义输入输出依赖关系，`default` 定义默认构建目标。
+
 </details>
 
-### 题目 3：相比于 Make，Ninja 为什么在大型项目中表现更出色？
-<details><summary>查看答案</summary>
-Ninja 采用了更简单的依赖跟踪逻辑，去除了复杂的脚本语法，最小化了磁盘 I/O。它能更高效地利用多核 CPU 进行并行构建，且其增量构建的时间复杂度更低，响应更快。
+### 题目 3：请写出 Linux 下安装并验证 Ninja 的完整命令链。
+
+<details>
+<summary>查看答案</summary>
+
+```bash
+sudo apt update
+sudo apt install -y ninja-build cmake
+command -v ninja
+ninja --version
+cmake -G Ninja -S . -B build/verify-ninja
+cmake --build build/verify-ninja -v
+```
+
 </details>
 
 ## 下一步
-→ 继续阅读 [02-CMake 搭配 Ninja](./02-CMake搭配Ninja.md)
 
+继续阅读 [02-CMake 搭配 Ninja](./02-CMake搭配Ninja.md)，学习如何在 CMakePresets 中组织 Ninja 的多平台构建流程。

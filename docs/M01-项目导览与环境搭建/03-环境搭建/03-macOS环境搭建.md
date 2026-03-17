@@ -1,140 +1,392 @@
 # macOS 环境搭建
+> **所属模块：** M01-项目导览与环境搭建  
+> **所属章节：** 03-环境搭建  
+> **前置知识：** [01-Windows环境搭建](./01-Windows环境搭建.md)、[02-Linux环境搭建](./02-Linux环境搭建.md)  
+> **下一节：** [04-Android环境搭建](./04-Android环境搭建.md)  
+> **预计阅读时间：** 60-80 分钟  
+> **适用系统：** macOS 13/14/15（Intel 与 Apple Silicon）  
+> **最后更新：** 2026-03-17
 
-本章节将引导你在 macOS 系统上搭建 KR2 项目的开发环境。我们以 macOS 14+ (Sonoma) 和 Apple Silicon (arm64) 架构为主要推荐。
+## 本节目标
+读完本节后，你将能够：
+1. 根据 KR2 仓库配置明确 macOS 构建要求，而不是凭经验安装。
+2. 完成 Xcode、Command Line Tools、Homebrew 的安装与验证。
+3. 对比并选择 CMake 安装方式（brew / dmg / 源码）。
+4. 完成 Ninja、vcpkg、bison、flex、Python、NASM 的安装与配置。
+5. 理解 Apple Silicon 与 Intel 在路径、架构、二进制产物上的差异。
+6. 理解 Framework 路径、Code Signing、Universal Binary 的基本概念。
+7. 使用项目预设完成首次 configure/build，并具备常见问题排查能力。
 
-## 1. 前提条件
+## 0. 先对齐项目真实配置（必须）
+先读取以下三处配置，再开始安装：
+- `krkr2/CMakePresets.json`
+- `krkr2/vcpkg.json`
+- `krkr2/.github/workflows/`
 
-- 推荐系统：macOS 14 (Sonoma) 或更高版本。
-- 架构：Apple Silicon (M1/M2/M3) 或 Intel。
-- 基础权限：需要管理员权限。
+### 0.1 `CMakePresets.json` 的 macOS 关键信息
+你可以确认到以下事实：
+1. macOS 预设名是 `MacOS Debug Config`、`MacOS Release Config`。
+2. 生成器是 `Ninja`。
+3. 编译器是 `clang` 与 `clang++`。
+4. 生效条件是 `hostSystemName == Darwin`。
+5. Debug 输出目录是 `out/macos/debug`。
+6. Release 输出目录是 `out/macos/release`。
+7. 对应 build 预设为 `MacOS Debug Build` 与 `MacOS Release Build`。
 
-## 2. 安装 Xcode 和 Command Line Tools
+### 0.2 `vcpkg.json` 的含义
+该项目使用 vcpkg manifest 模式，依赖中包含 `ffmpeg`、`cocos2dx`、`openal-soft`、`spdlog`、`libarchive`、`opencv4` 等。
+并且有 `osx` 平台条件条目。
+这意味着：
+1. configure 阶段会自动处理依赖。
+2. 首次构建时间长是正常现象。
+3. `VCPKG_ROOT` 与 PATH 错误会直接导致失败。
 
-Xcode 是 macOS 下必备的开发工具包。
+### 0.3 `.github/workflows/` 的现状
+当前仓库有 Windows、Linux、Android 工作流，没有独立 `build-macos.yml`。
+这不代表 macOS 不支持，而是代表本地环境验证要做得更严格。
 
-1.  从 App Store 下载并安装 **Xcode**。
-2.  安装 Xcode 命令行工具 (Command Line Tools)：
-    在终端输入：
-    ```bash
-    xcode-select --install
-    ```
-    在弹出的对话框中点击“安装”，等待下载并完成安装。
+## 1. macOS 版本要求和兼容性
+### 1.1 推荐版本
+- 推荐：macOS 14（Sonoma）/ 15（Sequoia）
+- 可用：macOS 13（Ventura）
+- 不建议：macOS 12 及更低
 
-## 3. 安装 Homebrew
+### 1.2 为什么建议新版本
+1. 系统 SDK 更完整。
+2. Apple Clang 更现代，C++17 兼容性更稳。
+3. Homebrew 与 vcpkg 在新系统遇到的兼容问题更少。
 
-Homebrew 是 macOS 下最流行的包管理器，我们将用它安装大部分工具。
+### 1.3 资源建议
+- 磁盘可用空间建议 ≥ 35GB。
+- 内存建议 ≥ 16GB。
+- 首次依赖拉取时建议稳定网络。
 
-在终端执行以下命令安装：
+## 2. Xcode 与 Command Line Tools
+### 2.1 安装 Xcode
+1. 从 App Store 安装 Xcode。
+2. 首次启动并接受协议。
+3. 确认 Xcode 可正常启动一次。
+
+### 2.2 安装 CLT
+```bash
+xcode-select --install
+```
+
+### 2.3 验证工具链
+```bash
+xcode-select -p
+clang --version
+```
+如果 `clang --version` 输出 Apple clang 版本号，说明 CLI 工具可用。
+
+### 2.4 常见许可问题
+若构建时报 license 错误，执行：
+```bash
+sudo xcodebuild -license accept
+```
+
+## 3. Homebrew 安装与配置
+### 3.1 安装命令
 ```bash
 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
 ```
-安装完成后，根据终端提示将 Homebrew 添加到 PATH 环境。
 
-## 4. 安装 CMake 3.31.1+
+### 3.2 Apple Silicon 与 Intel 前缀差异
+- Apple Silicon 默认前缀：`/opt/homebrew`
+- Intel 默认前缀：`/usr/local`
 
-使用 Homebrew 安装最新版本的 CMake：
+### 3.3 初始化 shell 环境
+Apple Silicon 常见：
+```bash
+eval "$(/opt/homebrew/bin/brew shellenv)"
+```
+Intel 常见：
+```bash
+eval "$(/usr/local/bin/brew shellenv)"
+```
 
+### 3.4 验证 Homebrew
+```bash
+brew --version
+brew doctor
+```
+
+## 4. Apple Silicon（M1/M2/M3）vs Intel 差异
+### 4.1 检查当前终端架构
+```bash
+uname -m
+arch
+```
+输出含义：
+- `arm64`：Apple Silicon 原生终端
+- `x86_64`：Intel 终端或 Rosetta 终端
+
+### 4.2 Rosetta 2 的定位
+Rosetta 2 用于兼容运行 x86_64 程序，不建议作为默认开发路径。
+安装命令（按需）：
+```bash
+softwareupdate --install-rosetta --agree-to-license
+```
+
+### 4.3 架构混用风险
+Apple Silicon 常见错误链路：
+1. arm64 终端安装一套依赖。
+2. Rosetta 终端再安装一套依赖。
+3. 链接阶段报 architecture mismatch。
+建议统一使用 arm64 终端和 `/opt/homebrew`。
+
+## 5. CMake 安装（brew vs dmg vs 源码）
+项目最低要求是 CMake 3.28.0，建议对齐 3.31.x。
+
+### 5.1 方案 A：brew（推荐）
 ```bash
 brew install cmake
+cmake --version
 ```
-输入 `cmake --version` 验证版本。
+优点：升级方便、维护成本低。
 
-## 5. 安装 Ninja
+### 5.2 方案 B：官方 dmg
+访问 <https://cmake.org/download/> 下载并安装。
+优点：版本精确可控；缺点：升级偏手工。
 
-Ninja 可以加速 CMake 的构建过程：
+### 5.3 方案 C：源码安装
+仅在需要定制 patch 时考虑，教程阶段不推荐。
 
+### 5.4 验证 cmake 来源
+```bash
+cmake --version
+which cmake
+```
+
+## 6. Ninja 安装
 ```bash
 brew install ninja
-```
-输入 `ninja --version` 验证。
-
-## 6. 安装 vcpkg
-
-1.  **克隆 vcpkg 仓库**：
-    ```bash
-    git clone https://github.com/microsoft/vcpkg.git ~/vcpkg
-    cd ~/vcpkg
-    ```
-2.  **引导 vcpkg**：
-    ```bash
-    ./bootstrap-vcpkg.sh
-    ```
-3.  **配置环境变量**：
-    macOS 默认使用 zsh，因此我们将环境变量添加到 `~/.zshrc`：
-    ```bash
-    export VCPKG_ROOT=$HOME/vcpkg
-    export PATH=$VCPKG_ROOT:$PATH
-    ```
-    执行 `source ~/.zshrc` 使其生效。
-
-## 7. 安装 bison 3.8.2+
-
-**重要提示**：macOS 系统自带的 `/usr/bin/bison` 版本非常陈旧（通常是 2.3 版本），无法满足 KR2 的编译需求。我们必须通过 Homebrew 安装新版本，并配置 PATH 优先级。
-
-1.  安装新版本 bison：
-    ```bash
-    brew install bison
-    ```
-2.  配置 PATH 优先级（确保 shell 优先找到 Homebrew 版本的 bison）：
-    在 `~/.zshrc` 中添加：
-    ```bash
-    export PATH="/opt/homebrew/opt/bison/bin:$PATH"
-    ```
-    然后执行 `source ~/.zshrc`。
-
-## 8. 安装 Python3
-
-macOS 系统自带的 Python 版本可能不全，建议通过 Homebrew 安装：
-
-```bash
-brew install python3
-```
-
-## 9. 安装 NASM
-
-为了支持汇编加速，需要安装 NASM：
-
-```bash
-brew install nasm
-```
-
-## 10. 验证工具安装
-
-在终端执行以下命令，确保所有工具安装正确且版本符合要求：
-
-```bash
-# 检查 CMake 版本
-cmake --version
-
-# 检查 Ninja 版本
 ninja --version
+which ninja
+```
 
-# 检查 vcpkg
+## 7. vcpkg 安装与配置
+### 7.1 克隆并引导
+```bash
+git clone https://github.com/microsoft/vcpkg.git "$HOME/vcpkg"
+"$HOME/vcpkg"/bootstrap-vcpkg.sh
+```
+
+### 7.2 配置环境变量（zsh）
+在 `~/.zshrc` 添加：
+```bash
+export VCPKG_ROOT="$HOME/vcpkg"
+export PATH="$VCPKG_ROOT:$PATH"
+```
+生效：
+```bash
+source ~/.zshrc
+```
+
+### 7.3 验证
+```bash
+echo "$VCPKG_ROOT"
 vcpkg version
+```
 
-# 检查 Bison
+## 8. bison/flex 安装（macOS 自带版本过旧）
+### 8.1 问题背景
+macOS 自带 `/usr/bin/bison` 常见为 2.3，版本偏旧。
+
+### 8.2 安装命令
+```bash
+brew install bison flex
+```
+
+### 8.3 PATH 前置（Apple Silicon）
+```bash
+export PATH="/opt/homebrew/opt/bison/bin:/opt/homebrew/opt/flex/bin:$PATH"
+```
+
+### 8.4 PATH 前置（Intel）
+```bash
+export PATH="/usr/local/opt/bison/bin:/usr/local/opt/flex/bin:$PATH"
+```
+
+### 8.5 验证命中版本
+```bash
+which bison
 bison --version
+which flex
+flex --version
+```
 
-# 检查 Python
+## 9. Python3 与 NASM
+```bash
+brew install python
+brew install nasm
 python3 --version
-
-# 检查 NASM
 nasm --version
 ```
 
-## 11. 练习题与答案
+## 10. Framework 路径与 Code Signing 概念
+### 10.1 Framework 路径
+常见路径：
+- `/System/Library/Frameworks`
+- `/Library/Frameworks`
 
-1.  在 macOS 上，即使你已经运行了 `brew install bison`，终端输入 `bison --version` 时仍然显示版本为 2.3。这通常是什么原因造成的？
-2.  在 Apple Silicon (M1/M2/M3) 架构的 macOS 上，Homebrew 的默认安装路径在哪里？
-3.  KR2 项目在 macOS 下通常使用哪个 shell？环境变量应写在哪个配置文件中？
+### 10.2 Code Signing 基础
+本地调试可先不做完整签名流程，但 `.app` 分发通常需要签名。
+```bash
+codesign -dv --verbose=4 /path/to/app_or_binary
+```
 
+## 11. 环境变量配置（.zshrc）
+推荐集中配置（Apple Silicon 示例）：
+```bash
+eval "$(/opt/homebrew/bin/brew shellenv)"
+export VCPKG_ROOT="$HOME/vcpkg"
+export PATH="$VCPKG_ROOT:$PATH"
+export PATH="/opt/homebrew/opt/bison/bin:/opt/homebrew/opt/flex/bin:$PATH"
+```
+执行：
+```bash
+source ~/.zshrc
+```
+
+## 12. Universal Binary（arm64 + x86_64）
+Universal Binary 指同一二进制同时包含 arm64 与 x86_64 机器码。
+开发阶段建议先保持单架构一致，发布阶段再考虑双架构。
+检查命令：
+```bash
+file /path/to/binary
+lipo -info /path/to/binary
+```
+
+## 13. 使用 preset 构建
+Debug：
+```bash
+cmake --preset="MacOS Debug Config"
+cmake --build --preset="MacOS Debug Build"
+```
+Release：
+```bash
+cmake --preset="MacOS Release Config"
+cmake --build --preset="MacOS Release Build"
+```
+
+## 14. 验证命令清单
+完成搭建后建议依次执行：
+```bash
+sw_vers
+uname -m
+xcode-select -p
+clang --version
+brew --version
+cmake --version
+ninja --version
+echo "$VCPKG_ROOT"
+vcpkg version
+bison --version
+flex --version
+python3 --version
+nasm --version
+```
+
+## 15. 常见 macOS 环境问题
+### 15.1 `bison --version` 仍是 2.3
+原因：命中系统 `/usr/bin/bison`。  
+修复：将 Homebrew bison 路径前置并 `source ~/.zshrc`。
+
+### 15.2 `cmake` 版本过低
+原因：PATH 指向旧版本。  
+修复：重装 CMake 并用 `which cmake` 检查来源。
+
+### 15.3 `vcpkg` 找不到
+原因：`VCPKG_ROOT` 或 PATH 配置不完整。  
+修复：补全 `.zshrc` 并重载 shell。
+
+### 15.4 Apple Silicon 架构冲突
+原因：x86_64 与 arm64 依赖混用。  
+修复：统一终端架构，清理并重建依赖。
+
+### 15.5 `xcode-select` 指向异常
+```bash
+sudo xcode-select --switch /Applications/Xcode.app/Contents/Developer
+```
+
+## 16. 动手实践
+### 步骤 1：安装核心工具
+```bash
+brew install cmake ninja bison flex python nasm
+```
+
+### 步骤 2：安装并配置 vcpkg
+```bash
+git clone https://github.com/microsoft/vcpkg.git "$HOME/vcpkg"
+"$HOME/vcpkg"/bootstrap-vcpkg.sh
+source ~/.zshrc
+vcpkg version
+```
+
+### 步骤 3：执行 Debug 构建
+```bash
+cmake --preset="MacOS Debug Config"
+cmake --build --preset="MacOS Debug Build"
+```
+
+### 步骤 4：记录环境快照
+记录以下信息：
+1. 系统版本
+2. CPU 架构
+3. cmake/ninja 版本
+4. bison/flex 版本
+5. 首次构建结果
+
+## 17. 对照项目源码
+相关文件与说明：
+- `krkr2/CMakePresets.json` 第 98-127 行：macOS configure preset。
+- `krkr2/CMakePresets.json` 第 148-153 行：macOS build preset。
+- `krkr2/vcpkg.json` 第 1-94 行：manifest 依赖清单。
+- `krkr2/.github/workflows/build-linux.yml` 第 54-58 行：CMake 版本参考基线。
+
+## 18. 本节小结
+- 核心工具链是 Xcode/CLT + Homebrew + CMake + Ninja + vcpkg。
+- Apple Silicon 与 Intel 差异主要在路径与架构一致性。
+- bison/flex 是高频坑点，PATH 顺序决定能否命中新版本。
+- 先稳定单架构，再考虑 Universal Binary 发布。
+
+## 19. 练习题与答案
+### 题目 1：Apple Silicon 上 Homebrew 默认路径是什么？
 <details>
 <summary>查看答案</summary>
 
-1.  **回答**：这是因为 macOS 系统自带了一个非常旧版本的 bison，其路径（通常是 `/usr/bin/bison`）在环境变量 **PATH** 中的优先级高于 Homebrew 安装的路径。你需要手动将 Homebrew 的 bison 路径（例如 `/opt/homebrew/opt/bison/bin`）添加到 PATH 的最前面。
-2.  **回答**：默认安装在 `/opt/homebrew` 目录下。而在传统的 Intel 架构 macOS 上，Homebrew 则默认安装在 `/usr/local` 目录下。
-3.  **回答**：现代 macOS (10.15+) 默认使用 **zsh**。因此，环境变量通常应当添加到用户主目录下的 `.zshrc` 文件中。
+默认路径是 `/opt/homebrew`。
 
 </details>
 
+### 题目 2：为什么安装了 bison 后仍可能显示 2.3？
+<details>
+<summary>查看答案</summary>
 
+因为 shell 命中了系统 `/usr/bin/bison`。需要把 Homebrew bison 目录前置到 PATH，并重新加载 shell。
+
+</details>
+
+### 题目 3：KR2 在 macOS 上的 Debug 构建命令是什么？
+<details>
+<summary>查看答案</summary>
+
+```bash
+cmake --preset="MacOS Debug Config"
+cmake --build --preset="MacOS Debug Build"
+```
+
+</details>
+
+### 题目 4：什么是 Universal Binary？
+<details>
+<summary>查看答案</summary>
+
+Universal Binary 是同一个可执行文件同时包含 arm64 与 x86_64 两种机器码，可在两类 Mac 上运行。
+
+</details>
+
+## 20. 下一步
+继续阅读 [04-Android环境搭建](./04-Android环境搭建.md)。
+下一节会把本节的工具链思路迁移到 Android NDK/SDK、Gradle、ABI 与签名流程。

@@ -1,210 +1,400 @@
 # 03-第一个 CMake 项目
 
-> **所属模块：** P01-现代CMake与构建工具链
-> **前置知识：** [02-CMake核心概念](./02-CMake核心概念.md)
-> **预计阅读时间：** 25 分钟
+> **所属模块：** P01-现代CMake与构建工具链  
+> **前置知识：** [02-CMake核心概念](./02-CMake核心概念.md)  
+> **预计阅读时间：** 30 分钟  
+> **适用平台：** Windows / Linux / macOS / Android
+
+## 元数据块
+
+| 字段 | 内容 |
+|---|---|
+| 教程类型 | P 系列前置知识 |
+| 章节位置 | 01-CMake是什么 / 第3节 |
+| 学习目标 | 独立创建并运行一个 CMake 项目 |
+| 实操结果 | 完成单文件与多文件构建 |
+| 后续衔接 | [01-变量与缓存](../02-CMake语法与命令/01-变量与缓存.md) |
 
 ## 本节目标
 
 读完本节后，你将能够：
-1. 在 Windows/Linux/macOS/Android 平台上安装并配置 CMake 环境
-2. 编写并运行一个最简单的 CMake 项目
-3. 学会处理多源文件项目及解决常见环境错误
+1. 从零创建一个 CMake 项目并跑通构建链路。
+2. 理解 `cmake_minimum_required()` 的版本策略意义。
+3. 掌握 `project()` 的 `VERSION`、`LANGUAGES`、`DESCRIPTION`、`HOMEPAGE_URL`。
+4. 掌握 `add_executable()` 的核心用法和维护方式。
+5. 完成头文件与源文件分离的多文件项目。
+6. 看懂构建目录关键文件并快速排错。
 
-## 安装 CMake (四平台指南)
+## 正文内容
 
-### 1. Windows 平台
-- **方法 A (官网安装)**: 前往 [cmake.org/download/](https://cmake.org/download/) 下载 `.msi` 安装包。安装时务必勾选 "Add CMake to the system PATH for all users"。
-- **方法 B (包管理器)**: 
-  - `winget install kitware.cmake`
-  - `choco install cmake` (如果你安装了 Chocolatey)
-  - `scoop install cmake` (如果你安装了 Scoop)
+### 1. 从零创建项目（step-by-step）
 
-### 2. Linux 平台
-- **Ubuntu/Debian**: `sudo apt update && sudo apt install cmake`
-- **Fedora**: `sudo dnf install cmake`
-- **Arch Linux**: `sudo pacman -S cmake`
-- **如果版本太旧**: 某些旧版系统（如 Ubuntu 20.04）自带的 CMake 版本过低，无法支持现代 CMake 功能。你可以通过 [Snap](https://snapcraft.io/cmake) 安装最新版：`sudo snap install cmake --classic`。
+先创建目录结构：
 
-### 3. macOS 平台
-- **Homebrew**: `brew install cmake`
-- **官网**: 下载 `.dmg` 文件并安装。
-
-### 4. Android 平台
-Android 开发者通常不需要手动安装独立的 CMake。
-- 打开 **Android Studio** -> Settings (Preferences) -> Languages & Frameworks -> Android SDK -> SDK Tools。
-- 勾选 **CMake** (推荐版本 3.22+) 和 **NDK** 进行安装。
-
-### 验证安装
-在终端/命令行（Windows 建议使用 PowerShell 或 CMD）输入：
-```bash
-cmake --version
+```text
+hello-cmake/
+├── CMakeLists.txt
+└── src/
+    └── main.cpp
 ```
-如果能看到类似 `cmake version 3.28.3` 的输出，说明你已经成功安装！
 
-## 创建第一个项目结构
+这个结构简单但完整，足够演示 CMake 的核心流程。
 
-在一个新目录下手动创建以下两个文件：
+#### 步骤 1：写 `main.cpp`
 
-### 1. main.cpp
+文件：`hello-cmake/src/main.cpp`
+
 ```cpp
-#include <iostream>
+#include <iostream> // 标准输出
 
 int main() {
-    std::cout << "Hello, CMake! Welcome to KrKr2." << std::endl;
-    return 0;
+    std::cout << "你好，CMake！第一个项目运行成功。" << std::endl; // 验证输出
+    return 0; // 正常结束
 }
 ```
 
-### 2. CMakeLists.txt (入口文件)
+#### 步骤 2：写 `CMakeLists.txt`
+
+文件：`hello-cmake/CMakeLists.txt`
+
 ```cmake
-# 声明 CMake 的最低版本要求 (必须在第一行)
-cmake_minimum_required(VERSION 3.10)
+cmake_minimum_required(VERSION 3.20) # 最低版本与策略基线
 
-# 定义项目名称
-project(HelloWorld)
+project(
+    HelloCMake
+    VERSION 1.0.0
+    DESCRIPTION "第一个 CMake 项目"
+    HOMEPAGE_URL "https://example.local/hello-cmake"
+    LANGUAGES CXX
+)
 
-# 添加一个可执行文件目标
-# 参数 1: 目标名称 (HelloWorld)
-# 参数 2: 包含的源文件列表 (main.cpp)
-add_executable(HelloWorld main.cpp)
-
-## 配置与构建
-
-我们现在采用"源外构建"的方式来运行这个项目。
-
-### 第一步：配置 (Configure)
-打开终端，进入你的项目文件夹，运行以下命令：
-```bash
-cmake -B build
+add_executable(HelloCMake src/main.cpp)
 ```
-- `-B build`：告诉 CMake 将所有的中间文件和构建产物放在一个名为 `build` 的文件夹中（如果该文件夹不存在，它会自动创建）。
-- 如果你想在 Windows 上使用 **Ninja** 生成器（推荐），可以运行：`cmake -B build -G Ninja`。
 
-### 第二步：构建 (Build)
-配置完成后，运行以下命令进行最终编译：
+#### 步骤 3：配置与构建
+
 ```bash
+cmake -S . -B build
 cmake --build build
 ```
-- `--build build`：这是一个跨平台命令，它会自动调用适合你系统的底层构建工具（如 Makefile、Ninja 或 Visual Studio）。
 
-## 运行程序
+解释：
+- `-S .` 指源码目录。
+- `-B build` 指构建目录。
+- `cmake --build` 自动调用对应后端工具。
 
-构建完成后，你会发现在 `build` 目录下生成了一个可执行文件。
+#### 步骤 4：运行程序
 
-### 1. Windows (CMD/PowerShell)
-```powershell
-.\build\HelloWorld.exe
-# 或者如果你使用的是 VS 生成器，路径可能更深：
-.\build\Debug\HelloWorld.exe
-```
+Linux / macOS：
 
-### 2. Linux / macOS
 ```bash
-./build/HelloWorld
+./build/HelloCMake
 ```
 
-### 3. Android
-Android 应用通常是通过 Gradle 自动调用 CMake 构建成共享库（`.so`）并打包进 `.apk` 中运行的。在后续教程中，我们会专门讲解如何为 KrKr2 开发 Android 版本的 C++ 代码。
+Windows：
 
-## 添加第二个源文件
+```powershell
+.\build\HelloCMake.exe
+```
 
-在实际项目中，我们会有很多源文件。现在我们来添加一个辅助工具文件：
+如果是 Visual Studio 生成器，可执行文件常在 `build\Debug\`。
 
-### 1. 创建 utils.h
+### 2. `cmake_minimum_required()` 版本策略详解
+
+核心写法：
+
+```cmake
+cmake_minimum_required(VERSION 3.20)
+```
+
+它有两层作用：
+1. **最低版本限制**：低于该版本直接报错，避免旧环境隐式兼容。
+2. **策略基线设置**：让命令行为按较新的语义执行，减少历史行为差异。
+
+为什么不建议写太低版本：
+- 一些现代命令行为不可用。
+- 团队成员之间更容易出现“同配置不同结果”。
+
+常见建议：
+- 教学和新项目：`3.20+`。
+- 团队项目：本地和 CI 版本保持一致。
+- 升级最低版本时，记录升级理由与影响范围。
+
+### 3. `project()` 命令参数详解
+
+推荐写法：
+
+```cmake
+project(
+    DemoProject
+    VERSION 2.3.1
+    DESCRIPTION "演示 project 参数"
+    HOMEPAGE_URL "https://example.local/demo-project"
+    LANGUAGES C CXX
+)
+```
+
+参数意义：
+- `VERSION`：项目版本号，常用于发布、日志和打包。
+- `LANGUAGES`：声明所需语言，避免无关探测。
+- `DESCRIPTION`：项目说明，便于工具链和文档系统展示。
+- `HOMEPAGE_URL`：项目主页地址，便于维护追踪。
+
+读取自动变量示例：
+
+```cmake
+message(STATUS "项目名: ${PROJECT_NAME}")
+message(STATUS "版本: ${PROJECT_VERSION}")
+message(STATUS "主版本: ${PROJECT_VERSION_MAJOR}")
+message(STATUS "次版本: ${PROJECT_VERSION_MINOR}")
+message(STATUS "补丁版本: ${PROJECT_VERSION_PATCH}")
+```
+
+### 4. `add_executable()` 详解
+
+基础语法：
+
+```cmake
+add_executable(目标名 源文件1 源文件2)
+```
+
+示例：
+
+```cmake
+add_executable(app src/main.cpp)
+add_executable(tool src/tool_main.cpp src/tool_util.cpp)
+```
+
+理解重点：
+1. 定义一个可执行目标。
+2. 绑定编译输入文件。
+3. 在生成阶段生成该目标对应规则。
+
+维护建议：
+- 小项目直接列文件最清晰。
+- 文件增多后可以用 `target_sources()` 分组。
+
+### 5. 多文件项目示例（头文件 + 源文件分离）
+
+目录结构：
+
+```text
+hello-cmake/
+├── CMakeLists.txt
+├── include/
+│   └── greeter.h
+└── src/
+    ├── greeter.cpp
+    └── main.cpp
+```
+
+文件：`include/greeter.h`
+
 ```cpp
-#ifndef UTILS_H
-#define UTILS_H
+#ifndef GREETER_H
+#define GREETER_H
 
-void sayHello();
+#include <string>
+
+std::string 获取问候语(); // 函数声明
 
 #endif
 ```
 
-### 2. 创建 utils.cpp
-```cpp
-#include <iostream>
-#include "utils.h"
+文件：`src/greeter.cpp`
 
-void sayHello() {
-    std::cout << "This message is from utils.cpp!" << std::endl;
+```cpp
+#include "greeter.h"
+
+std::string 获取问候语() {
+    return "你好，来自多文件 CMake 项目！"; // 返回固定字符串
 }
 ```
 
-### 3. 修改 main.cpp
+文件：`src/main.cpp`
+
 ```cpp
 #include <iostream>
-#include "utils.h"
+#include "greeter.h"
 
 int main() {
-    std::cout << "Hello, CMake!" << std::endl;
-    sayHello(); // 调用 utils 里的函数
+    std::cout << 获取问候语() << std::endl; // 调用子模块
     return 0;
 }
 ```
 
-### 4. 更新 CMakeLists.txt
-将新的源文件添加到 `add_executable` 目标中：
-```cmake
-cmake_minimum_required(VERSION 3.10)
-project(HelloWorld)
+多文件版本 `CMakeLists.txt`：
 
-# 将 utils.cpp 也加入构建
-add_executable(HelloWorld main.cpp utils.cpp)
+```cmake
+cmake_minimum_required(VERSION 3.20)
+
+project(
+    HelloMultiFile
+    VERSION 1.1.0
+    DESCRIPTION "多文件 CMake 项目"
+    HOMEPAGE_URL "https://example.local/hello-multi"
+    LANGUAGES CXX
+)
+
+add_executable(HelloMultiFile
+    src/main.cpp
+    src/greeter.cpp
+)
+
+target_include_directories(HelloMultiFile
+    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
 ```
 
-现在重新运行 `cmake --build build`，CMake 会自动增量编译新添加的文件。
+### 6. 四平台构建命令对比
 
-## 常见错误排查
+| 平台 | 推荐生成器 | 配置命令 | 构建命令 |
+|---|---|---|---|
+| Windows | Ninja / Visual Studio 17 2022 | `cmake -S . -B build -G Ninja` | `cmake --build build` |
+| Linux | Ninja / Unix Makefiles | `cmake -S . -B build -G Ninja` | `cmake --build build` |
+| macOS | Ninja / Xcode | `cmake -S . -B build -G Ninja` | `cmake --build build` |
+| Android | Ninja + NDK 工具链 | `cmake -S . -B build-android -G Ninja -DCMAKE_TOOLCHAIN_FILE=$NDK/build/cmake/android.toolchain.cmake -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-24` | `cmake --build build-android` |
 
-### 1. CMake Error: Could not find CMAKE_CXX_COMPILER
-**原因：** 你的系统中没有安装 C++ 编译器，或者编译器不在环境变量中。
-**解决方法：**
-- **Windows**: 安装 Visual Studio（勾选 "C++ 桌面开发" 工作负载）。
-- **Linux**: 安装 `build-essential` 包 (`sudo apt install build-essential`)。
-- **macOS**: 安装 Xcode 命令行工具 (`xcode-select --install`)。
+补充：
+- Android 常由 Gradle 调用 CMake，上述命令是等价底层流程。
+- Visual Studio 是多配置生成器，产物通常带 `Debug/Release` 子目录。
 
-### 2. CMake Error: The source directory does not appear to contain CMakeLists.txt
-**原因：** 你运行命令的路径不正确，或者 `CMakeLists.txt` 文件名拼写错误。
-**解决方法：** 确认你正在项目根目录下运行命令，且文件名完全匹配（包括大小写）。
+### 7. 构建目录结构解释
+
+第一次配置后，`build/` 目录常见文件如下：
+
+```text
+build/
+├── CMakeCache.txt
+├── CMakeFiles/
+├── build.ninja
+├── cmake_install.cmake
+└── HelloCMake(.exe)
+```
+
+关键说明：
+- `CMakeCache.txt`：缓存变量、编译器路径、探测结果。
+- `CMakeFiles/`：内部中间文件目录。
+- `build.ninja`：Ninja 后端规则文件。
+- `cmake_install.cmake`：安装命令对应脚本。
+
+排错建议：
+- 切换生成器或编译器后，删除旧构建目录再配置。
+- 路径问题优先检查 `CMakeCache.txt`。
+
+### 8. 常见新手错误与解决方案
+
+#### 错误 1：找不到 C++ 编译器
+
+报错：`Could not find CMAKE_CXX_COMPILER`
+
+解决：
+- Windows：安装 Visual Studio 的 C++ 工作负载。
+- Linux：安装 `build-essential` 或 `gcc g++`。
+- macOS：执行 `xcode-select --install`。
+- Android：检查 NDK 与工具链路径是否正确。
+
+#### 错误 2：找不到 `CMakeLists.txt`
+
+报错：`The source directory does not appear to contain CMakeLists.txt`
+
+解决：
+- 确认当前目录是项目根目录。
+- 确认文件名大小写正确。
+- 使用显式源码路径：`cmake -S <源码目录> -B build`。
+
+#### 错误 3：头文件未找到
+
+报错：`fatal error: greeter.h: No such file or directory`
+
+解决：
+
+```cmake
+target_include_directories(HelloMultiFile PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+```
+
+#### 错误 4：Windows 可以编译，Linux 失败
+
+常见原因：文件名大小写不一致。
+
+解决：
+- `#include` 路径与实际文件名完全一致。
+- 建议统一使用小写文件名。
+
+## 动手实践
+
+> 目标：创建一个“可输出版本号”的多文件项目。
+
+### 实操步骤
+
+1. 创建 `practice-cmake/`、`src/`、`include/`。
+2. 在 `include/version.h` 声明 `获取版本字符串()`。
+3. 在 `src/version.cpp` 返回 `"Practice 1.0.0"`。
+4. 在 `src/main.cpp` 打印欢迎语与版本号。
+5. 编写 `CMakeLists.txt`，包含：
+   - `cmake_minimum_required(VERSION 3.20)`
+   - `project(Practice VERSION 1.0.0 LANGUAGES CXX DESCRIPTION "实践项目" HOMEPAGE_URL "https://example.local/practice")`
+   - `add_executable(Practice src/main.cpp src/version.cpp)`
+   - `target_include_directories(Practice PRIVATE include)`
+6. 执行 `cmake -S . -B build`。
+7. 执行 `cmake --build build`。
+8. 运行程序并核对输出。
+
+参考输出：
+
+```text
+欢迎来到实践项目！
+当前版本: Practice 1.0.0
+```
 
 ## 本节小结
 
-- 安装 CMake 是迈向现代 C++ 开发的第一步。
-- 典型的 CMake 构建流程是 `cmake -B build` + `cmake --build build`。
-- 多源文件项目只需在 `add_executable` 中列出所有参与编译的 `.cpp` 文件。
+- 你已经掌握第一个 CMake 项目的完整闭环。
+- 你已经理解最低版本与策略行为的关系。
+- 你已经掌握 `project()` 核心参数与 `add_executable()` 用法。
+- 你已经能搭建多文件项目并处理 include 路径。
 
 ## 练习题与答案
 
-### 题目 1：在配置阶段，`-B build` 命令中的 `-B` 代表什么意思？
+### 题目 1
+
+为什么 `cmake_minimum_required(VERSION 3.20)` 不建议改成很低版本？
 
 <details>
 <summary>查看答案</summary>
 
-`-B` 代表 "Binary directory"（二进制目录），也就是构建目录。它指定了 CMake 应该在哪里生成构建系统文件（如 Makefile 或 Ninja 文件）以及最终的可执行文件。
+版本过低会导致现代语义和新特性不可用，还可能触发旧策略行为，造成多人协作时构建结果不一致，排错成本更高。
 
 </details>
 
-### 题目 2：为什么我们在 CMakeLists.txt 中添加新源文件（如 utils.cpp）后，只需要重新运行 `cmake --build build` 而通常不需要重新运行 `cmake -B build`？
+### 题目 2
+
+请写一个包含 `VERSION`、`LANGUAGES`、`DESCRIPTION`、`HOMEPAGE_URL` 的 `project()`。
 
 <details>
 <summary>查看答案</summary>
 
-因为 CMake 生成的底层构建工具（如 Makefile 或 Ninja）具有自动触发重新配置的功能。当你运行构建命令时，构建工具会发现 `CMakeLists.txt` 已被修改，它会自动先运行 CMake 配置过程，然后再进行编译。
-
-</details>
-
-### 题目 3：请写出一个跨平台的 CMake 构建命令（不依赖于具体生成器）。
-
-<details>
-<summary>查看答案</summary>
-
-`cmake --build <构建目录名>`，例如：`cmake --build build`。
-
-</details>
-
-## 下一步
-
-→ 恭喜！你已经完成了第一章的学习。接下来我们将深入 [P02-核心模块剖析] 了解 KrKr2 的内部构造。
-
+```cmake
+project(
+    MyApp
+    VERSION 0.1.0
+    DESCRIPTION "我的规范 CMake 项目"
+    HOMEPAGE_URL "https://example.local/myapp"
+    LANGUAGES CXX
+)
 ```
+
+</details>
+
+### 题目 3
+
+为什么推荐 `cmake -S . -B build` 而不是 `cmake .`？
+
+<details>
+<summary>查看答案</summary>
+
+因为 `-S/-B` 对应源外构建：源码目录不被污染、可维护多个构建目录、清理构建状态更简单，适合长期项目维护。
+
+</details>
+## 下一步
+→ [01-变量与缓存](../02-CMake语法与命令/01-变量与缓存.md)

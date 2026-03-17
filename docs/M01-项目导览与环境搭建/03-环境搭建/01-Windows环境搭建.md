@@ -1,148 +1,400 @@
 # Windows 环境搭建
 
-本章节将引导你在 Windows 10 或 Windows 11 (x64) 系统上搭建 KR2 项目的开发环境。我们将安装编译器、构建工具以及包管理器。
+> **所属模块：** M01-项目导览与环境搭建  
+> **前置知识：** [01-目录结构与模块职责](../02-项目架构总览/01-目录结构与模块职责.md)  
+> **预计阅读时间：** 45 分钟  
+> **适用系统：** Windows 10 / Windows 11 x64  
+> **最后更新：** 2026-03-17
 
-## 1. 前提条件
+## 本节目标
 
-在开始之前，请确保你的系统满足以下要求：
-- 操作系统：Windows 10 或 Windows 11 (64位)
-- 硬盘空间：至少预留 20GB 空间（Visual Studio 和 vcpkg 比较占用空间）
-- 网络连接：需要稳定的互联网连接以执行在线安装和下载依赖。
+读完本节后，你将能够：
 
-## 2. 安装 Visual Studio 2022
+1. 安装 Visual Studio 2022 的必要工作负载和组件。
+2. 验证 MSVC 编译器满足 C++17 要求。
+3. 在 Windows 上配置 CMake、Ninja、vcpkg、Git、winflexbison。
+4. 正确设置 `VCPKG_ROOT` 与 `PATH`。
+5. 用项目 preset 完成首次 configure 与 build。
 
-Visual Studio 是 Windows 平台首选的 C++ 开发环境。KR2 项目推荐使用 Visual Studio 2022。
+## 1. 先核对项目真实配置
 
-1.  访问 [Visual Studio 官网](https://visualstudio.microsoft.com/zh-hans/downloads/)。
-2.  下载 **Community** 版本（对个人开发者免费）。
-3.  运行安装程序。在“工作负载”选项卡中，勾选 **“使用 C++ 的桌面开发” (Desktop development with C++)**。
-4.  在右侧的“安装详细信息”窗格中，确保选中以下关键组件：
-    - **MSVC v143 - VS 2022 C++ x64/x86 生成工具** (最新版本)
-    - **Windows 11 SDK (10.0.xxxxx.0)** 或 Windows 10 SDK
-    - **C++ CMake 工具 for Windows**
-5.  点击“安装”，等待安装完成。
+开始安装前，先看仓库配置，避免装错版本：
 
-## 3. 安装 CMake 3.31.1+
+- `CMakePresets.json` 的 Windows preset 使用 `Ninja`。
+- Windows triplet 固定为 `x64-windows-static-md`。
+- 根 `CMakeLists.txt` 要求 `cmake_minimum_required(VERSION 3.28)`。
+- 根 `CMakeLists.txt` 设置 `set(CMAKE_CXX_STANDARD 17)`。
+- 非 Android 分支会读取 `$ENV{VCPKG_ROOT}`。
+- `cpp/core/tjs2/CMakeLists.txt` 会查找 `win_bison.exe`。
 
-CMake 是一个跨平台的构建系统生成器，KR2 使用 CMake 管理工程。
+结论：
 
-- **方法 A（官网下载）**：访问 [CMake 官网下载页面](https://cmake.org/download/)，下载 Windows x64 Installer (.msi)。安装时，建议选择“Add CMake to the system PATH for all users”。
-- **方法 B（命令行）**：打开 PowerShell，运行：
-    ```powershell
-    winget install kitware.cmake
-    ```
+1. Ninja 不是可选项。
+2. `VCPKG_ROOT` 必须配置正确。
+3. `winflexbison` 必须可在 PATH 中找到。
 
-安装完成后，打开命令行输入 `cmake --version` 检查版本，确保版本大于等于 3.31.1。
+## 2. 前提条件
 
-## 9. 环境变量总结表格
+- 系统：Windows 10 22H2 或 Windows 11 23H2 及以上。
+- 架构：x64。
+- 磁盘：建议预留 30GB。
+- 网络：可访问 GitHub 与常见源码镜像站。
+- 权限：安装阶段建议管理员权限。
 
-为了方便检查，以下是 KR2 相关的关键环境变量总结：
+## 3. Visual Studio 2022 安装详解
 
-| 变量名 | 推荐设置方式 | 说明 |
-| :--- | :--- | :--- |
-| `PATH` | 添加 VS 安装目录、vcpkg、CMake、Ninja、winflexbison、Python、NASM 所在的目录 | 系统路径变量，用于全局执行命令 |
-| `VCPKG_ROOT` | 在“高级系统设置”中手动添加。路径格式示例：`D:/vcpkg` | vcpkg 的安装根目录 |
+Visual Studio 在本项目里不只是 IDE，
+它还是 MSVC 与 SDK 的官方来源。
 
-## 10. 验证工具安装
+### 3.1 下载
 
-在完成以上所有步骤后，请务必执行以下命令进行检查：
+1. 打开：https://visualstudio.microsoft.com/zh-hans/downloads/
+2. 下载 **Visual Studio 2022 Community**。
+3. 运行安装器 `VisualStudioSetup.exe`。
 
-```powershell
-# 检查 CMake 版本
-cmake --version
+### 3.2 工作负载选择
 
-# 检查 Ninja 版本
-ninja --version
+在“工作负载”页至少勾选：
 
-# 检查 vcpkg
-vcpkg version
+- **使用 C++ 的桌面开发**。
 
-# 检查 win_flex 和 win_bison
-win_flex --version
-win_bison --version
+建议额外勾选：
 
-# 检查 Python
-python --version
+- **使用 C++ 的游戏开发**（可选，但有助于后续图形调试）。
 
-# 检查 NASM
-nasm --version
+### 3.3 组件选择（非常关键）
+
+切到“单个组件”，确认以下条目存在：
+
+1. `MSVC v143 - VS 2022 C++ x64/x86 生成工具`。
+2. `Windows 11 SDK`（或最新 Windows 10 SDK）。
+3. `C++ CMake tools for Windows`。
+4. `MSBuild`。
+
+可选增强：
+
+1. AddressSanitizer。
+2. 调试工具（Windows）。
+
+### 3.4 像看截图一样检查安装页面
+
+安装页面通常分为：
+
+- 左侧：工作负载列表。
+- 右侧：安装详细信息。
+- 底部：安装位置、下载大小、安装后占用。
+
+请重点确认：
+
+1. 右侧有 `MSVC v143`。
+2. 右侧有 `Windows SDK`。
+3. 底部可用空间充足。
+
+### 3.5 安装后验证
+
+打开 **x64 Native Tools Command Prompt for VS 2022**，执行：
+
+```bat
+cl
 ```
 
-如果所有命令都能输出正确的版本号，说明你的 Windows 开发环境已经搭建完毕。
+输出包含 `Microsoft (R) C/C++ Optimizing Compiler` 即为正常。
 
-## 11. 练习题与答案
+## 4. MSVC 版本要求（C++17）
 
-以下是关于 Windows 环境搭建的几个小问题：
+项目根 `CMakeLists.txt` 设置了：
 
-1.  在 Windows 下配置 `VCPKG_ROOT` 环境变量时，最需要注意的路径格式问题是什么？
-2.  如果在命令行输入 `cmake --version` 提示“不是内部或外部命令”，你应该如何排查？
-3.  为什么 KR2 项目需要安装 winflexbison？
+```cmake
+set(CMAKE_CXX_STANDARD 17)
+```
+
+推荐基线：
+
+- VS 2022 17.x
+- 工具集 v143
+
+在终端执行 `cl` 可以查看版本信息。
+常见 `19.3x.xxxxx` 已可稳定支持 C++17。
+
+## 5. CMake 安装方式对比
+
+本项目最低需要 CMake 3.28。
+
+### 5.1 方式 A：VS 自带 CMake
+
+优点：安装一步到位。
+缺点：在外部终端的 PATH 可见性可能不一致。
+
+### 5.2 方式 B：官网独立安装（推荐）
+
+1. 访问 https://cmake.org/download/
+2. 下载 Windows x64 MSI。
+3. 安装时勾选“Add CMake to the system PATH for all users”。
+
+### 5.3 方式 C：包管理器
+
+```powershell
+winget install Kitware.CMake
+```
+
+或：
+
+```powershell
+scoop install cmake
+```
+
+### 5.4 验证
+
+```powershell
+cmake --version
+```
+
+## 6. Ninja 安装与配置
+
+Windows preset 使用 Ninja，因此必须安装。
+
+安装方式：
+
+1. 使用 VS 自带 Ninja。
+2. 下载 `ninja-win.zip` 手动解压并加 PATH。
+3. 通过 winget 安装。
+
+```powershell
+winget install Ninja-build.Ninja
+```
+
+验证：
+
+```powershell
+ninja --version
+```
+
+## 7. vcpkg 安装与 `VCPKG_ROOT` 配置
+
+KR2 使用 vcpkg manifest（根目录有 `vcpkg.json`）。
+依赖在 configure/build 过程中自动解析。
+
+### 7.1 安装
+
+建议安装到短路径，避免空格：
+
+```powershell
+git clone https://github.com/microsoft/vcpkg.git D:/vcpkg
+D:/vcpkg/bootstrap-vcpkg.bat
+```
+
+### 7.2 配置环境变量
+
+变量名：`VCPKG_ROOT`
+
+示例值：`D:/vcpkg`
+
+图形界面路径：
+
+1. 打开“编辑系统环境变量”。
+2. 点击“环境变量”。
+3. 新建变量 `VCPKG_ROOT`。
+
+### 7.3 路径写法建议
+
+- 推荐：`D:/vcpkg`
+- 可用：`D:\\vcpkg`
+- 不推荐在 CMake 字符串场景直接写 `D:\vcpkg`
+
+### 7.4 为什么这是硬性要求
+
+根 `CMakeLists.txt` 写了：
+
+```cmake
+set(CMAKE_TOOLCHAIN_FILE $ENV{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake)
+```
+
+变量错误会导致 configure 失败。
+
+## 8. Git for Windows 配置
+
+### 8.1 安装
+
+下载地址：https://git-scm.com/download/win
+
+安装时建议选择：
+
+- `Git from the command line and also from 3rd-party software`
+
+### 8.2 基础配置
+
+```powershell
+git --version
+git config --global user.name "你的名字"
+git config --global user.email "你的邮箱"
+```
+
+### 8.3 行尾建议
+
+```powershell
+git config --global core.autocrlf true
+```
+
+## 9. winflexbison 安装与 PATH 配置
+
+KR2 在 `cpp/core/tjs2/CMakeLists.txt` 中搜索 `win_bison.exe`。
+因此 Windows 下必须正确安装 winflexbison。
+
+### 9.1 安装步骤
+
+1. 打开发布页：https://github.com/lexxmark/winflexbison/releases
+2. 下载 zip（例如 2.5.25）。
+3. 解压到 `C:\tools\winflexbison`。
+4. 将该目录加入 PATH。
+
+### 9.2 验证
+
+```powershell
+win_bison --version
+win_flex --version
+```
+
+## 10. Python 与 NASM（可选）
+
+如果你后续要扩展依赖编译链，建议提前安装 Python 与 NASM：
+
+- Python 下载：https://www.python.org/downloads/windows/
+- NASM 下载：https://www.nasm.us/
+
+验证命令：`python --version`、`nasm --version`
+
+## 11. PowerShell vs CMD vs Git Bash
+
+| 终端 | 优点 | 缺点 | 推荐场景 |
+| :--- | :--- | :--- | :--- |
+| PowerShell | 与 Windows 集成好、脚本能力强 | 语法与 Bash 不同 | **默认推荐：构建与排障** |
+| CMD | 兼容传统批处理 | 功能较弱 | 快速执行旧脚本 |
+| Git Bash | 接近 Linux 命令习惯 | 与 VS 环境变量偶有差异 | Git 操作、类 Unix 命令 |
+
+建议同一次排障固定一种终端，
+避免路径转义和变量语法混用。
+
+## 12. 环境变量汇总表
+
+| 变量名 | 必需 | 示例值 | 作用 |
+| :--- | :---: | :--- | :--- |
+| `VCPKG_ROOT` | 是 | `D:/vcpkg` | 指向 vcpkg 根目录，供 CMake 注入 toolchain |
+| `PATH` | 是 | 包含 cmake/ninja/git/winflexbison/python/nasm | 让命令在全局可执行 |
+
+建议加入 PATH 的目录：
+
+1. CMake 可执行目录。
+2. Ninja 可执行目录。
+3. Git 可执行目录。
+4. `C:\tools\winflexbison`。
+5. Python 可执行目录。
+6. NASM 可执行目录。
+
+## 13. 验证工具安装成功的命令清单
+
+```powershell
+cmake --version
+ninja --version
+git --version
+cl
+python --version
+nasm --version
+win_bison --version
+win_flex --version
+echo $env:VCPKG_ROOT
+Test-Path "$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake"
+```
+
+判断标准：
+
+1. 各工具命令都能返回版本。
+2. `VCPKG_ROOT` 不为空。
+3. `Test-Path` 返回 `True`。
+
+## 14. 动手实践
+
+> 目标：按项目标准流程完成 Windows Debug 构建。
+
+### 步骤 1：进入仓库目录
+
+```powershell
+cd C:/Users/Administrator/Downloads/code/KR2/krkr2
+```
+
+### 步骤 2：执行 configure
+
+```powershell
+cmake --preset="Windows Debug Config" -DDISABLE_TEST=ON
+```
+
+### 步骤 3：执行 build
+
+```powershell
+cmake --build --preset="Windows Debug Build"
+```
+
+### 步骤 4：确认产物目录
+
+应出现：`out/windows/debug`
+
+该流程与 `scripts/build-windows.bat` 保持一致。
+
+## 15. 常见 Windows 环境问题排查
+
+| 现象 | 快速检查命令 | 常见根因 | 处理建议 |
+| :--- | :--- | :--- | :--- |
+| `cmake` 不存在 | `where cmake` | CMake 未安装或 PATH 未生效 | 安装 CMake，重开终端 |
+| `ninja` 不存在 | `where ninja` | Ninja 未安装 | 安装 Ninja 并加入 PATH |
+| 找不到 toolchain | `echo $env:VCPKG_ROOT` / `Test-Path "$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake"` | `VCPKG_ROOT` 错误 | 修正变量并重开终端 |
+| `win_bison` 找不到 | `where win_bison` | winflexbison 未加入 PATH | 加入 `C:\tools\winflexbison` |
+| `cl` 不可用 | `cl` | VS 组件缺失或环境未激活 | 在 VS Installer 补齐 v143+SDK |
+| triplet 混用 | 查看 configure 日志 | 手工参数与 preset 冲突 | 统一使用 preset，清理 build |
+
+## 16. 对照项目源码
+
+- `CMakePresets.json`：Windows 生成器 `Ninja`，triplet `x64-windows-static-md`。
+- `CMakeLists.txt`：最低 CMake 3.28、C++17、`VCPKG_ROOT` toolchain 注入。
+- `cpp/core/tjs2/CMakeLists.txt`：`find_program(BISON_EXECUTABLE NAMES win_bison.exe bison.exe bison)`。
+- `scripts/build-windows.bat`：Debug configure/build 标准命令。
+
+## 17. 本节小结
+
+- Windows 基础链路：MSVC + CMake + Ninja + vcpkg + winflexbison。
+- 最高频问题：PATH 与 `VCPKG_ROOT`。
+- 最稳妥流程：先“版本验证”，再“preset configure/build”。
+
+## 18. 练习题与答案
+
+### 题目 1：为什么 KR2 在 Windows 上必须安装 Ninja？
 
 <details>
 <summary>查看答案</summary>
 
-1.  **回答**：在 Windows 上，`VCPKG_ROOT` 的路径分隔符必须使用正斜杠 `/` 或双反斜杠 `\\`（例如 `D:/vcpkg`），而不能直接使用单反斜杠 `\`（例如 `D:\vcpkg`），否则 CMake 可能无法正确处理该路径。
-2.  **回答**：
-    - 首先确认 CMake 是否已安装。
-    - 其次确认 CMake 的 `bin` 目录（例如 `C:\Program Files\CMake\bin`）是否已添加到系统的 **PATH** 环境变量中。
-    - 如果是刚修改了环境变量，请关闭并重新打开命令行终端，让新配置生效。
-3.  **回答**：KR2 项目中包含了一些需要进行语法分析或词法分析的代码（通常是自定义的脚本引擎或解析器），这些代码生成需要依赖 `flex` 和 `bison` 工具。而在 Windows 上，winflexbison 是这两个工具的推荐移植版本。
+因为项目在 `CMakePresets.json` 的 Windows 预设里明确使用 `Ninja` 作为生成器。
+没有 Ninja，`cmake --preset` 无法生成构建系统。
 
 </details>
 
+### 题目 2：`VCPKG_ROOT` 配置错误会导致什么典型错误？
 
-## 5. 安装 vcpkg
+<details>
+<summary>查看答案</summary>
 
-vcpkg 是 Microsoft 开发的 C++ 库管理器。在 KR2 中，绝大部分外部依赖（如 glib、libpng 等）都是通过 vcpkg 自动下载并编译的。
+会在 configure 阶段出现 `Could not find toolchain file` 或类似报错。
+因为根 `CMakeLists.txt` 会从 `$ENV{VCPKG_ROOT}` 拼接 vcpkg toolchain 路径。
 
-1.  **克隆 vcpkg 仓库**：
-    打开 PowerShell 或 Git Bash，切换到你想放置 vcpkg 的目录（例如 `D:\dev`），运行：
-    ```bash
-    git clone https://github.com/microsoft/vcpkg.git
-    cd vcpkg
-    ```
-2.  **引导 vcpkg (Bootstrap)**：
-    运行 vcpkg 目录下的引导脚本：
-    ```powershell
-    .\bootstrap-vcpkg.bat
-    ```
-3.  **配置 VCPKG_ROOT 环境变量**：
-    - 右键“此电脑” -> “属性” -> “高级系统设置” -> “环境变量”。
-    - 在“用户变量”中新建变量名 `VCPKG_ROOT`，值为你的 vcpkg 根目录路径。
-    - **特别注意**：在 Windows 上设置 `VCPKG_ROOT` 时，路径必须使用 `/` 或 `\\` 作为分隔符，不能直接使用单 `\`。
-        - ❌ 错误示例：`D:\vcpkg` (CMake 可能无法正确转义路径)
-        - ✅ 正确示例：`D:/vcpkg` 或 `D:\\vcpkg`
-    - 点击“确定”并重启所有已打开的命令行终端。
+</details>
 
-## 6. 安装 winflexbison 2.5.25
+### 题目 3：为什么要单独安装 winflexbison？
 
-winflexbison 是词法分析器和语法分析生成器的 Windows 移植版本。
+<details>
+<summary>查看答案</summary>
 
-1.  从 [GitHub Releases](https://github.com/lexxmark/winflexbison/releases/tag/v2.5.25) 下载 `win_flex_bison-2.5.25.zip`。
-2.  将其解压到一个固定位置，例如 `C:\tools\winflexbison`。
-3.  将该目录添加到你的系统 **PATH** 环境变量中。
+KR2 的 TJS2 模块在 CMake 中会查找 `win_bison.exe`。
+Windows 下若没有 winflexbison 或 PATH 未配置，会导致语法文件生成失败。
 
-## 7. 安装 Python3
+</details>
 
-KR2 的构建脚本和一些构建工具依赖 Python。
-
-- 访问 [Python 官网](https://www.python.org/downloads/) 下载最新的 Python 3.x 安装器。
-- 安装时务必勾选 **“Add Python to PATH”**。
-- 你也可以通过 Microsoft Store 直接安装 Python。
-
-## 8. 安装 NASM
-
-NASM 是一个 80x86 汇编器，用于编译某些高性能计算库的汇编代码。
-
-1.  访问 [NASM 官网](https://www.nasm.us/) 下载 Windows 安装程序。
-2.  运行安装程序并完成安装。
-3.  找到 NASM 的安装路径（通常是 `C:\Users\用户名\AppData\Local\bin\NASM`），将该路径添加到 **PATH**。
-
-
-## 4. 安装 Ninja
-
-Ninja 是一个小巧、极速的构建工具，常与 CMake 搭配使用。
-
-- **获取途径**：如果你安装了 Visual Studio 的 CMake 支持，Ninja 通常已经包含在内。
-- **手动安装**：可以从 [Ninja GitHub Releases](https://github.com/ninja-build/ninja/releases) 下载 `ninja-win.zip`，解压后将 `ninja.exe` 所在目录添加到系统的 PATH 环境变量中。
-- **验证**：在命令行输入 `ninja --version`。
+## 19. 下一步
+- [02-Linux环境搭建](./02-Linux环境搭建.md)
+你将看到同一项目在 Linux 平台上的工具安装与排障差异。

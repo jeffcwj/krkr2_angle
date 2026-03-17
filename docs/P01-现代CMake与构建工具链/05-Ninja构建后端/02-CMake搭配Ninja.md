@@ -1,191 +1,350 @@
 # CMake 搭配 Ninja
 
-> **所属模块：** P01-现代 CMake 与构建工具链
-> **前置知识：** 01-Ninja 简介与安装
-> **预计阅读时间：** 20 分钟
+> **所属模块：** P01-现代 CMake 与构建工具链  
+> **前置知识：** [01-Ninja简介与安装](./01-Ninja简介与安装.md)  
+> **预计阅读时间：** 25 分钟  
+> **适用平台：** Windows / Linux / macOS / Android（交叉编译链路）
 
 ## 本节目标
+
 读完本节后，你将能够：
-1. 学会如何在 CMake 中指定 Ninja 作为生成器。
-2. 掌握 Windows 上针对 Ninja 的开发环境配置。
-3. 实现从配置到构建的完整工作流。
-4. 运用 Ninja 的并行、增量及详细日志等高级构建特性。
 
-## 指定 Ninja 生成器
-在使用 CMake 时，如果你想生成 `build.ninja` 而不是默认的 Makefile 或解决方案文件，你需要通过 `-G` 参数指定生成器。
+1. 说清 CMake 与 Ninja 在构建流程中的分工。
+2. 正确使用 `-G "Ninja"` 与 `-G "Ninja Multi-Config"`。
+3. 基于 KrKr2 的 `CMakePresets.json` 执行统一构建。
+4. 理解单配置与多配置对 Debug/Release 管理的差异。
+5. 生成并使用 `compile_commands.json` 完成 IDE 集成。
+6. 用 `ccache + Ninja` 进一步减少重复编译开销。
+7. 用 `-v` 与 `-d explain` 快速定位构建问题。
 
-### 命令行指定
+## CMake 与 Ninja 的协作关系
+
+可以把流程拆成两步：
+
+1. **配置阶段（Configure）**：CMake 读取 CMakeLists，生成 `build.ninja`。
+2. **构建阶段（Build）**：Ninja 执行 `build.ninja` 中的规则。
+
+因此：
+
+- `cmake -S . -B out -G Ninja` 负责“生成规则”。
+- `cmake --build out` 负责“执行规则”。
+
+这个分层让你能在保持 CMakeLists 不变的情况下切换后端。
+
+## `-G "Ninja"` 与 `-G "Ninja Multi-Config"` 的区别
+
+### `-G "Ninja"`：单配置
+
+单配置模式下，一个构建目录只对应一个构建类型。
+你通常用 `CMAKE_BUILD_TYPE` 指定类型。
+
 ```bash
-# -B 指定输出目录为 build，-G 指定生成器为 Ninja
-cmake -B build -G Ninja
+cmake -S . -B out/linux/debug -G "Ninja" -DCMAKE_BUILD_TYPE=Debug
+cmake --build out/linux/debug
+
+cmake -S . -B out/linux/release -G "Ninja" -DCMAKE_BUILD_TYPE=Release
+cmake --build out/linux/release
 ```
 
-### 使用 CMakePresets.json 指定 (KrKr2 的做法)
-在 `CMakePresets.json` 中，我们可以为不同的平台定义生成器。这样你就不用每次都敲长长的命令行参数了。
+### `-G "Ninja Multi-Config"`：多配置
+
+多配置模式下，一个构建目录中可以同时管理多种配置。
+构建时用 `--config` 选择具体配置。
+
+```bash
+cmake -S . -B out/linux/multi -G "Ninja Multi-Config"
+cmake --build out/linux/multi --config Debug
+cmake --build out/linux/multi --config Release
+```
+
+### 对照结论
+
+| 维度 | Ninja | Ninja Multi-Config |
+|---|---|---|
+| 配置目录 | 每个配置一个目录 | 一个目录多个配置 |
+| 主要控制参数 | `CMAKE_BUILD_TYPE` | `--config` |
+| 切换方式 | 切目录 | 同目录切换 |
+
+KrKr2 当前预设采用的是单配置 `Ninja`。
+
+## KrKr2 的 CMakePresets.json 中 Ninja 实际配置
+
+根据项目当前 `krkr2/CMakePresets.json`：
+
+1. `Windows Config` 生成器是 `Ninja`。
+2. `Linux Config` 生成器是 `Ninja`。
+3. `MacOS Config` 生成器是 `Ninja`。
+4. 三平台基础预设都打开了 `CMAKE_EXPORT_COMPILE_COMMANDS=true`。
+
+这说明 Ninja 是项目当前默认后端，而非文档示例。
+
+### Debug / Release 的组织
+
+项目通过继承预设并拆分目录：
+
+- Linux Debug：`out/linux/debug`
+- Linux Release：`out/linux/release`
+- Windows 与 macOS 也是同样模式
+
+这是单配置 Ninja 的标准管理方式。
+
+## 用 CMakePresets 驱动 Ninja
+
+### Windows
+
+在 Visual Studio 开发者命令行执行：
+
+```powershell
+cmake --preset "Windows Debug Config"
+cmake --build --preset "Windows Debug Build"
+```
+
+### Linux
+
+```bash
+cmake --preset "Linux Debug Config"
+cmake --build --preset "Linux Debug Build"
+```
+
+### macOS
+
+```bash
+cmake --preset "MacOS Debug Config"
+cmake --build --preset "MacOS Debug Build"
+```
+
+### Android（交叉编译链路）
+
+KrKr2 Android 主要入口是 Gradle：
+
+```bash
+./platforms/android/gradlew -p ./platforms/android assembleDebug
+```
+
+你可以把它理解为“Gradle 驱动 CMake，再由 Ninja 执行 native 构建”。
+
+## Ninja Multi-Config 的多构建类型管理
+
+虽然 KrKr2 当前未使用 Multi-Config，但你应知道其适用场景。
+
+适合：
+
+1. 频繁在 Debug/Release 间切换。
+2. 希望一个目录内同时保留多配置产物。
+
+迁移注意：
+
+1. 脚本中若依赖 `CMAKE_BUILD_TYPE`，需改为 `--config`。
+2. CI 与缓存目录策略需要同步调整。
+
+## compile_commands.json 与 IDE 集成
+
+`compile_commands.json` 是编译命令数据库。
+它记录每个源文件的真实编译命令和参数。
+
+KrKr2 已通过预设默认开启：
+
+```json
+"CMAKE_EXPORT_COMPILE_COMMANDS": true
+```
+
+常见输出位置：
+
+- `out/windows/debug/compile_commands.json`
+- `out/linux/debug/compile_commands.json`
+- `out/macos/debug/compile_commands.json`
+
+### VS Code + clangd 示例
 
 ```json
 {
-  "version": 3,
-  "configurePresets": [
-    {
-      "name": "default-ninja",
-      "generator": "Ninja",
-      "binaryDir": "${sourceDir}/build"
-    }
+  "clangd.arguments": [
+    "--compile-commands-dir=out/linux/debug"
   ]
 }
 ```
-运行预设命令：
+
+### 使用收益
+
+1. 补全与跳转更准确。
+2. 诊断更贴近真实构建参数。
+3. 跨文件重构误报更少。
+
+## ccache + Ninja 加速编译
+
+Ninja 负责快调度，ccache 负责快复用。
+
 ```bash
-cmake --preset default-ninja
+cmake -S . -B out/linux/debug -G "Ninja" \
+  -DCMAKE_BUILD_TYPE=Debug \
+  -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+  -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+
+cmake --build out/linux/debug
+ccache -s
 ```
 
-## 完整构建流程
+Windows + MSVC 场景一般用 `sccache` 思路。
 
-### 1. Windows 平台（环境要求）
-在 Windows 上使用 Ninja 时，Ninja 本身并不包含编译器。通常我们需要搭配 **MSVC** (Microsoft Visual C++ Compiler, `cl.exe`)。
+## Ninja 调试构建问题的技巧
 
-**关键点：环境变量**
-`cl.exe` 不能在普通的命令行中直接运行，因为它需要一系列环境变量（如 `INCLUDE`, `LIB`）来找到 SDK 路径。
+### `-v`：输出完整构建命令
 
-* **正确做法：使用 Developer Command Prompt**
-  你可以在开始菜单搜索“Developer Command Prompt for VS 2022”或“x64 Native Tools Command Prompt for VS 2022”。
+```bash
+cmake --build out/linux/debug -- -v
+```
 
-在开发者命令行中执行：
+用于检查 include、宏、链接顺序和编译器路径。
+
+### `-d explain`：解释重构建原因
+
+```bash
+ninja -C out/linux/debug -d explain
+```
+
+用于回答“为什么这个目标被重建”。
+
+### 联合使用
+
+```bash
+ninja -C out/linux/debug -v -d explain
+```
+
+## 并行度控制与资源管理
+
+Ninja 默认并行通常较高。
+你可以显式控制并发线程：
+
+```bash
+cmake --build out/linux/debug -- -j8
+ninja -C out/linux/debug -j8
+```
+
+建议：
+
+1. 16GB 内存可从 `-j4` 起步。
+2. 32GB 内存可尝试 `-j8`。
+3. 链接阶段内存紧张时应下调并发。
+
+## KrKr2 项目中的实际流程演示
+
+### Linux 开发流程
+
+```bash
+cmake --preset "Linux Debug Config"
+cmake --build --preset "Linux Debug Build"
+cmake --build --preset "Linux Debug Build" -- -v
+ninja -C out/linux/debug -d explain
+```
+
+### Windows 发布前流程
+
 ```powershell
-# 1. 配置工程
-cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
-
-# 2. 执行构建
-cmake --build build
+cmake --preset "Windows Release Config"
+cmake --build --preset "Windows Release Build"
 ```
 
-如果你在普通命令行中运行，CMake 会报错提示 `cl.exe` 找不到，或者编译一个简单的测试程序失败。
-
-### 2. Linux 和 macOS 平台
-相比 Windows，类 Unix 系统（Linux/macOS）的环境通常更加简单。只要你安装了 `gcc` 或 `clang`，Ninja 就能直接上手。
+### macOS 对比流程
 
 ```bash
-# 1. 配置工程
-cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug
-
-# 2. 执行构建
-cmake --build build
+cmake --preset "MacOS Debug Config"
+cmake --build --preset "MacOS Debug Build"
+cmake --preset "MacOS Release Config"
+cmake --build --preset "MacOS Release Build"
 ```
 
-### 3. 使用 CMakePresets 的统一工作流
-在 KrKr2 项目中，我们提倡使用统一的预设工作流：
+## 对照项目源码
+
+相关文件：
+
+- `krkr2/CMakePresets.json` 第 8-129 行：`configurePresets` 主体。
+- `krkr2/CMakePresets.json` 第 10-12、68-70、98-100 行：三平台统一 `generator: Ninja`。
+- `krkr2/CMakePresets.json` 第 34-47、82-95、114-127 行：Debug/Release 分目录与构建类型。
+- `krkr2/CMakePresets.json` 第 13-17、71-74、101-106 行：开启 `CMAKE_EXPORT_COMPILE_COMMANDS`。
+- `krkr2/CMakePresets.json` 第 130-154 行：`buildPresets` 映射构建入口。
+
+## 动手实践
+
+请按步骤实际执行一次：
+
+### 步骤 1：列出预设
 
 ```bash
-# Windows / Linux / macOS 通用
-cmake --preset "Windows-Debug-Config"
-cmake --build --preset "Windows-Debug-Build"
+cmake --list-presets
 ```
-（具体的预设名称请参考项目根目录下的 `CMakePresets.json`）
 
-## 高级构建特性
-
-### 并行构建
-Ninja 最显著的特点就是它的**自动并行化**。
-
-当你执行 `cmake --build build` 时，CMake 会在后台调用 `ninja`。默认情况下，Ninja 会检测你的 CPU 核心数，并自动开启相应数量的线程。
-
-如果你想手动控制并行程度（例如在内存较小的机器上）：
-```bash
-# 使用 CMake 通用命令传递 -j 参数给底层构建器
-cmake --build build -- -j4
-
-# 或者直接调用 ninja 命令
-ninja -C build -j4
-```
-注：`-C build` 告诉 Ninja 进入 `build` 目录执行构建任务。
-
-### 增量构建
-增量构建（Incremental Build）是开发中最常用的功能。当你只修改了一个源文件时，Ninja 只需要重新编译这一个文件。
-
-**实验环节：**
-1. 运行 `cmake --build build` 完成初次构建。
-2. 打开项目中的任意 `.cpp` 文件，加一行空注释。
-3. 再次运行 `cmake --build build`。
-4. 你会看到 Ninja 几乎瞬间就完成了，并提示 `[1/1] Linking...`。
-
-### 清理构建
-如果你想删除所有生成的可执行文件、库以及中间产物（`.obj`, `.o`）：
+### 步骤 2：执行一次 Debug 构建
 
 ```bash
-# 使用 CMake 通用命令
-cmake --build build --target clean
-
-# 直接调用 ninja
-ninja -C build clean
+cmake --preset "Linux Debug Config"
+cmake --build --preset "Linux Debug Build"
 ```
 
-### 查看详细日志 (Verbose Mode)
-在某些时候，编译报错，但你看不出是因为什么参数导致。这时你需要查看完整的编译命令。
+### 步骤 3：检查命令数据库
+
+确认 `out/linux/debug/compile_commands.json` 已生成。
+
+### 步骤 4：触发增量构建
+
+修改一个源文件中的注释后再次构建，观察只重编译少量目标。
+
+### 步骤 5：排查重建原因
 
 ```bash
-# 启用详细输出
-cmake --build build -- -v
-
-# 或者直接调用 ninja
-ninja -C build -v
-```
-它会输出类似 `cl.exe /c /Iinclude ... main.cpp` 的完整参数，方便你排查包含路径、宏定义等问题。
-
-## 常见问题排查
-
-### 1. "ninja: error: loading 'build.ninja': 系统找不到指定的文件"
-**现象：** 运行 `ninja` 或 `cmake --build build` 报错。
-**解决：** 你还没有进行“配置（Configure）”阶段。请先运行 `cmake -B build -G Ninja` 确保 `build.ninja` 被生成。
-
-### 2. "cl is not recognized" (Windows)
-**现象：** CMake 配置阶段提示找不到 C 编译器。
-**解决：** 你没有在“开发者命令行（Developer Command Prompt）”中运行。请从 VS 菜单中打开专用命令行，或者在普通命令行中手动执行 `vcvarsall.bat`。
-
-### 3. 构建卡住或系统响应缓慢
-**现象：** 电脑风扇狂转，屏幕卡死。
-**解决：** Ninja 默认并行度过高，导致内存占满。尝试减少并行数，如使用 `-j2` 或 `-j4`。
-
-## 对照 KrKr2 构建脚本
-为了简化操作，KrKr2 提供了一些方便的脚本。你可以阅读 `scripts/build-windows.bat`，你会发现它本质上也是在做同样的几件事：
-
-```batch
-:: scripts/build-windows.bat (示例片段)
-@echo off
-set BUILD_DIR=build/windows-release
-cmake -B %BUILD_DIR% -G Ninja -DCMAKE_BUILD_TYPE=Release
-cmake --build %BUILD_DIR%
-```
-
-而在 Linux 脚本 `scripts/build-linux.sh` 中：
-
-```bash
-#!/bin/bash
-# scripts/build-linux.sh (示例片段)
-BUILD_DIR="build/linux-debug"
-cmake -B "$BUILD_DIR" -G Ninja -DCMAKE_BUILD_TYPE=Debug
-cmake --build "$BUILD_DIR"
+cmake --build --preset "Linux Debug Build" -- -v
+ninja -C out/linux/debug -d explain
 ```
 
 ## 本节小结
-本节你掌握了 CMake 与 Ninja 的“黄金搭档”用法。你学会了如何在 Windows 开发者环境下配置工程，以及如何利用并行构建和详细日志来加速和优化你的开发流程。
+
+- KrKr2 当前统一采用单配置 Ninja 后端。
+- Debug/Release 通过 preset + 分目录管理，清晰且稳定。
+- `compile_commands.json` 已默认开启，IDE 与 LSP 集成成本低。
+- `-v` 与 `-d explain` 是 Ninja 排障核心命令。
+- 合理并行度与缓存策略能显著优化构建体验。
 
 ## 练习题与答案
 
-### 题目 1：如果你已经在 CMakePresets.json 中设置了 `"generator": "Ninja"`，在配置阶段还需要手动敲 `-G Ninja` 吗？
-<details><summary>查看答案</summary>
-不需要。当你使用 `cmake --preset <name>` 时，CMake 会自动读取预设中的 `generator` 设置。
+### 题目 1：KrKr2 当前使用的是哪种 Ninja 生成器模式？依据是什么？
+
+<details>
+<summary>查看答案</summary>
+
+是单配置模式。  
+依据：`CMakePresets.json` 的 `generator` 使用 `Ninja`，不是 `Ninja Multi-Config`。  
+并且 Debug/Release 通过不同 `binaryDir` 与 `CMAKE_BUILD_TYPE` 管理。
+
 </details>
 
-### 题目 2：在 Windows 上，直接在 PowerShell 中运行 `cmake -B build -G Ninja` 提示 `cl.exe` 找不到，应该如何解决？
-<details><summary>查看答案</summary>
-应该在“Visual Studio 开发者命令行（Developer Command Prompt）”中运行，或者在当前 PowerShell 窗口中先执行 Visual Studio 提供的 `vcvarsall.bat` 脚本来初始化环境变量。
+### 题目 2：为什么 `compile_commands.json` 对编辑器体验影响很大？
+
+<details>
+<summary>查看答案</summary>
+
+因为它提供了真实编译参数。  
+clangd 等工具据此解析 include、宏与标准选项。  
+没有它时，补全、跳转和诊断常与真实构建不一致。
+
 </details>
 
-### 题目 3：如何查看 Ninja 构建时具体的编译参数（例如包含了哪些头文件路径）？
-<details><summary>查看答案</summary>
-使用详细模式（Verbose Mode），在构建时添加 `-v` 参数，即：`cmake --build build -- -v` 或 `ninja -C build -v`。
+### 题目 3：当构建意外大面积重编译时，应先执行什么命令？
+
+<details>
+<summary>查看答案</summary>
+
+优先执行：
+
+```bash
+cmake --build <build_dir> -- -v
+ninja -C <build_dir> -d explain
+```
+
+`-v` 查看具体执行命令，`-d explain` 查看触发重建原因。
+
 </details>
 
 ## 下一步
-→ 恭喜！你已完成第五章“Ninja 构建后端”的学习。接下来的章节我们将深入探讨 P01 模块的其他高级特性。
+
+完成本节后，进入 P01 第六章实战：
+
+- [01-根CMakeLists解读](../06-实战-分析KrKr2的CMake/01-根CMakeLists解读.md)

@@ -1,115 +1,523 @@
 # Android 环境搭建
 
-本章节将引导你为 KR2 项目配置 Android 交叉编译环境。你可以使用 Windows、Linux 或 macOS 任何一个系统作为宿主机来编译 Android 版本的程序。
+> **所属模块：** M01-项目导览与环境搭建
+>
+> **前置知识：** [01-Windows环境搭建](./01-Windows环境搭建.md)、[02-Linux环境搭建](./02-Linux环境搭建.md)、[03-macOS环境搭建](./03-macOS环境搭建.md)
+>
+> **预计阅读时间：** 60 分钟
 
-## 1. 前提条件
+本节将完整搭建 KR2 的 Android 构建环境。
 
-- 宿主系统：Windows 10/11、Linux (Ubuntu 22.04+) 或 macOS 14+。
-- 硬盘空间：至少预留 30GB 空间。Android SDK 和 NDK 比较占空间。
+本节所有版本号都来自项目真实文件。
 
-## 2. 安装 Android SDK 和 NDK
+## 本节目标
 
-KR2 对 NDK 的版本有严格要求，请务必安装指定版本。
+读完本节后，你将能够：
 
-1.  **Android Studio**：
-    - 下载并安装 [Android Studio](https://developer.android.google.cn/studio)。
-    - 在 Android Studio 中打开 **Settings -> Languages & Frameworks -> Android SDK**。
-    - 在 **SDK Platforms** 选项卡下，勾选 Android 14 (API level 34) 或更高。
-    - 在 **SDK Tools** 选项卡下，勾选：
-        - **NDK (Side by side)**：点击右下角 "Show Package Details"，勾选版本 **28.0.13004108**。
-        - **Android SDK Command-line Tools (latest)**
-        - **CMake** (3.31.1+，建议通过独立安装程序安装最新版)
+1. 安装 Android SDK（Android Studio 与命令行两种方式）。
+2. 安装并锁定项目要求的 NDK 版本。
+3. 配置 JDK 17 与 Android/vcpkg 环境变量。
+4. 理解 Gradle 的关键 Android 配置。
+5. 理解 CMake Android 交叉编译链路。
+6. 理解 vcpkg Android triplet 配置。
+7. 使用 ADB 完成模拟器与真机调试。
 
-2.  **环境变量配置**：
-    你需要配置以下三个关键环境变量：
-    - `ANDROID_SDK`：Android SDK 的安装路径（例如 `C:\Users\用户名\AppData\Local\Android\Sdk`）。
-    - `ANDROID_NDK`：NDK 的根路径（例如 `.../Sdk/ndk/28.0.13004108`）。
-    - `JAVA_HOME`：JDK 17 的安装路径。
+## 1. 先核对项目真实配置
 
-## 3. 安装 JDK 17
+请先阅读这些文件，再执行安装。
 
-KR2 的 Android 构建脚本要求使用 JDK 17。
+- `krkr2/platforms/android/build.gradle`
+- `krkr2/platforms/android/gradle.properties`
+- `krkr2/platforms/android/app/build.gradle`
+- `krkr2/cmake/vcpkg_android.cmake`
+- `krkr2/CMakePresets.json`
+- `krkr2/vcpkg/triplets/arm64-android.cmake`
+- `krkr2/vcpkg/triplets/x64-android.cmake`
+- `krkr2/vcpkg/triplets/arm-android.cmake`
+- `krkr2/vcpkg/triplets/x86-android.cmake`
+- `krkr2/vcpkg/triplets/android-dynamic-libs.cmake`
 
-- 推荐安装 [Eclipse Temurin JDK 17](https://adoptium.net/temurin/releases/?version=17)。
-- 安装完成后，请确认 `java -version` 输出版本为 17。
+关键结论如下：
 
-## 4. 安装基础构建工具
+- Android Gradle 插件：`8.7.3`
+- Kotlin Android 插件：`1.9.22`
+- `compileSdk=34`
+- `minSdkVersion=29`
+- `targetSdkVersion=34`
+- `ndkVersion='28.0.13004108'`
+- ABI：`arm64-v8a`、`x86_64`
+- CMake 版本：`3.31.1`
+- CMake 路径：`../../../CMakeLists.txt`
 
-Android 交叉编译仍然需要宿主环境的构建工具支持。请根据你的宿主平台，参考前三章的方法安装以下工具：
+另外，`CMakePresets.json` 当前没有 Android preset。
 
-- **CMake 3.31.1+**
-- **Ninja**
-- **vcpkg** (务必设置 `VCPKG_ROOT`)
-- **Bison 3.8.2+** (Windows 下安装 winflexbison)
-- **Python 3.x**
-- **NASM**
+这不是错误。
 
-## 5. 编译 Android 项目
+本项目 Android 入口是 Gradle externalNativeBuild。
 
-KR2 的 Android 编译使用 Gradle 构建系统。
+## 2. 安装 Android SDK（Android Studio 方式）
 
-- **使用命令行编译**：
-    在项目根目录下运行：
-    ```bash
-    ./platforms/android/gradlew -p ./platforms/android assembleDebug
-    ```
-    这条命令会调用 Gradle Wrapper 自动下载对应的 Gradle 版本，并启动编译任务。
+该方式适合首次搭环境。
 
-- **使用 Android Studio 编译**：
-    在 Android Studio 中打开项目文件夹下的 `platforms/android` 目录。IDE 将自动同步 Gradle 配置。同步完成后，点击工具栏上的 "Run" (绿色三角形) 按钮，即可将项目安装到连接的 Android 设备或模拟器上。
+1. 安装 Android Studio。
+2. 打开 `Settings/Preferences -> Android SDK`。
+3. 在 `SDK Platforms` 勾选 Android 14（API 34）。
+4. 在 `SDK Tools` 勾选 Command-line Tools、Platform-Tools、NDK、CMake。
+5. 打开 `Show Package Details` 并选择 NDK `28.0.13004108`。
 
-## 6. FAQ：常见问题与修复
+默认 SDK 路径参考：
 
-### 6.1 glib 安装失败（Windows 交叉编译 Android）
+- Windows：`C:\Users\<用户名>\AppData\Local\Android\Sdk`
+- Linux：`/home/<用户名>/Android/Sdk`
+- macOS：`/Users/<用户名>/Library/Android/sdk`
 
-在 Windows 上交叉编译 Android 版本时，由于 Meson 编译系统的一个路径处理漏洞，可能会导致 glib 库安装失败。具体表现为路径中出现了错误的 `"/./"` 分隔符。
+## 3. 安装 Android SDK（命令行方式）
 
-**修复步骤**：
-1.  找到 vcpkg 下载的工具目录，路径类似于：`VCPKG_ROOT/downloads/tools/meson-1.6.1-哈希值/mesonbuild/minstall.py`。
-2.  打开该文件，搜索 `install_data` 函数。
-3.  在该函数中手动修改代码，确保生成的安装路径经过正则替换或简单的字符串替换，消除 `"/./"` 带来的路径解析错误。
+该方式适合 CI 与自动化。
 
-### 6.2 Docker 替代方案
+### 3.1 配置 PATH
 
-如果你不想在本地宿主环境中安装繁琐的 Android 工具链，可以使用 KR2 提供的 Docker 构建环境。
+Windows：
 
-在项目根目录下运行：
-```bash
-docker build -f dockers/android.Dockerfile -t android-builder .
+```powershell
+$env:ANDROID_SDK="C:\Users\$env:USERNAME\AppData\Local\Android\Sdk"
+$env:Path += ";$env:ANDROID_SDK\cmdline-tools\latest\bin;$env:ANDROID_SDK\platform-tools"
+sdkmanager.bat --version
 ```
-该镜像已预先配置好所有 Android 构建所需的 NDK、SDK 和工具链环境。
 
-## 7. 验证工具安装
-
-在终端执行以下命令，确保 Android 开发环境配置正确：
+Linux：
 
 ```bash
-# 检查 JAVA_HOME
-echo $JAVA_HOME
-
-# 检查 SDK 命令 (Windows 下使用 sdkmanager.bat)
+export ANDROID_SDK=$HOME/Android/Sdk
+export PATH=$PATH:$ANDROID_SDK/cmdline-tools/latest/bin:$ANDROID_SDK/platform-tools
 sdkmanager --version
-
-# 检查 NDK 目录 (Windows 下使用 ls 或 dir)
-ls $ANDROID_NDK
-
-# 检查 Gradle (使用项目自带的 Wrapper)
-./platforms/android/gradlew -v
 ```
 
-## 8. 练习题与答案
+macOS：
 
-1.  在 Windows 系统上为 Android 交叉编译 KR2 项目时，为什么要关注 `VCPKG_ROOT` 目录下的 `mesonbuild/minstall.py` 文件？
-2.  KR2 项目推荐使用的 Android NDK 版本是多少？安装该版本时有什么特殊的注意事项？
-3.  为什么 KR2 项目不需要单独在宿主系统上安装 Gradle？
+```bash
+export ANDROID_SDK=$HOME/Library/Android/sdk
+export PATH=$PATH:$ANDROID_SDK/cmdline-tools/latest/bin:$ANDROID_SDK/platform-tools
+sdkmanager --version
+```
+
+### 3.2 安装组件
+
+Windows：
+
+```powershell
+sdkmanager.bat --sdk_root=$env:ANDROID_SDK "platform-tools" "platforms;android-34" "build-tools;34.0.0" "ndk;28.0.13004108" "cmake;3.31.1"
+yes | sdkmanager.bat --licenses
+```
+
+Linux：
+
+```bash
+sdkmanager --sdk_root=$ANDROID_SDK "platform-tools" "platforms;android-34" "build-tools;34.0.0" "ndk;28.0.13004108" "cmake;3.31.1"
+yes | sdkmanager --licenses
+```
+
+macOS：
+
+```bash
+sdkmanager --sdk_root=$ANDROID_SDK "platform-tools" "platforms;android-34" "build-tools;34.0.0" "ndk;28.0.13004108" "cmake;3.31.1"
+yes | sdkmanager --licenses
+```
+
+### 3.3 验证安装
+
+Windows：
+
+```powershell
+Get-ChildItem "$env:ANDROID_SDK\ndk"
+Get-ChildItem "$env:ANDROID_SDK\platforms"
+```
+
+Linux/macOS：
+
+```bash
+ls $ANDROID_SDK/ndk
+ls $ANDROID_SDK/platforms
+```
+
+## 4. 安装 JDK 17 与环境变量
+
+KR2 Android 构建要求 JDK 17。
+
+### 4.1 Java 检查
+
+```bash
+java -version
+```
+
+### 4.2 JAVA_HOME 配置
+
+Windows：
+
+```powershell
+$env:JAVA_HOME="C:\Program Files\Eclipse Adoptium\jdk-17"
+$env:Path += ";$env:JAVA_HOME\bin"
+java -version
+```
+
+Linux：
+
+```bash
+export JAVA_HOME=/usr/lib/jvm/temurin-17-jdk-amd64
+export PATH=$PATH:$JAVA_HOME/bin
+java -version
+```
+
+macOS：
+
+```bash
+export JAVA_HOME=$(/usr/libexec/java_home -v 17)
+export PATH=$PATH:$JAVA_HOME/bin
+java -version
+```
+
+### 4.3 Android/vcpkg 环境变量
+
+Windows：
+
+```powershell
+$env:ANDROID_SDK="C:\Users\$env:USERNAME\AppData\Local\Android\Sdk"
+$env:ANDROID_NDK="$env:ANDROID_SDK\ndk\28.0.13004108"
+$env:ANDROID_NDK_HOME=$env:ANDROID_NDK
+$env:VCPKG_ROOT="D:\tools\vcpkg"
+```
+
+Linux：
+
+```bash
+export ANDROID_SDK=$HOME/Android/Sdk
+export ANDROID_NDK=$ANDROID_SDK/ndk/28.0.13004108
+export ANDROID_NDK_HOME=$ANDROID_NDK
+export VCPKG_ROOT=$HOME/vcpkg
+```
+
+macOS：
+
+```bash
+export ANDROID_SDK=$HOME/Library/Android/sdk
+export ANDROID_NDK=$ANDROID_SDK/ndk/28.0.13004108
+export ANDROID_NDK_HOME=$ANDROID_NDK
+export VCPKG_ROOT=$HOME/vcpkg
+```
+
+## 5. Gradle 配置详解
+
+对照 `krkr2/platforms/android/app/build.gradle`：
+
+- `compileSdk` 来自 `PROP_COMPILE_SDK_VERSION=34`
+- `minSdkVersion=29`
+- `targetSdkVersion=34`
+- `ndkVersion='28.0.13004108'`
+- `abiFilters='arm64-v8a','x86_64'`
+- `splits.abi.include='arm64-v8a','x86_64'`
+
+说明：
+
+- `minSdkVersion` 决定最低可安装系统。
+- `targetSdkVersion` 决定系统行为策略。
+- ABI 过滤和分包必须一致。
+
+## 6. CMake for Android 原理
+
+对照 `krkr2/cmake/vcpkg_android.cmake`：
+
+1. 检查 `ANDROID_NDK_HOME`。
+2. 检查 `VCPKG_ROOT`。
+3. 按 `ANDROID_ABI` 映射 `VCPKG_TARGET_TRIPLET`。
+4. 组合 vcpkg 与 Android toolchain。
+
+映射表：
+
+| ANDROID_ABI | VCPKG_TARGET_TRIPLET |
+|---|---|
+| arm64-v8a | arm64-android |
+| armeabi-v7a | arm-android |
+| x86_64 | x64-android |
+| x86 | x86-android |
+
+关键组合：
+
+- `CMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake`
+- `VCPKG_CHAINLOAD_TOOLCHAIN_FILE=$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake`
+
+## 7. vcpkg Android triplet 配置详解
+
+目录：`krkr2/vcpkg/triplets/`
+
+核心文件：
+
+- `arm64-android.cmake`
+- `arm-android.cmake`
+- `x64-android.cmake`
+- `x86-android.cmake`
+
+共同参数：
+
+- `VCPKG_CRT_LINKAGE static`
+- `VCPKG_LIBRARY_LINKAGE static`
+- `VCPKG_CMAKE_SYSTEM_NAME Android`
+- `VCPKG_CMAKE_SYSTEM_VERSION 28`
+
+特殊文件：`android-dynamic-libs.cmake`
+
+- `sdl2` 在该文件中设为动态链接。
+
+## 8. ADB 调试工具使用
+
+### 8.1 设备连接
+
+Windows：
+
+```powershell
+adb start-server
+adb devices -l
+```
+
+Linux/macOS：
+
+```bash
+adb start-server
+adb devices -l
+```
+
+### 8.2 安装与启动
+
+Windows：
+
+```powershell
+adb install -r .\platforms\android\out\android\app\outputs\apk\debug\krkr2-1.5.0-all.apk
+adb shell monkey -p org.github.krkr2 -c android.intent.category.LAUNCHER 1
+```
+
+Linux/macOS：
+
+```bash
+adb install -r ./platforms/android/out/android/app/outputs/apk/debug/krkr2-1.5.0-all.apk
+adb shell monkey -p org.github.krkr2 -c android.intent.category.LAUNCHER 1
+```
+
+### 8.3 日志与卸载
+
+Windows：
+
+```powershell
+adb logcat -d | Select-String "org.github.krkr2"
+adb uninstall org.github.krkr2
+```
+
+Linux/macOS：
+
+```bash
+adb logcat -d | grep org.github.krkr2
+adb uninstall org.github.krkr2
+```
+
+## 9. 模拟器 vs 真机调试
+
+| 维度 | 模拟器（x86_64） | 真机（arm64-v8a） |
+|---|---|---|
+| 速度 | 快 | 中等 |
+| ABI 一致性 | 低 | 高 |
+| 真实性 | 中 | 高 |
+| 适用场景 | 日常回归 | 提交前验证 |
+
+推荐策略：先模拟器回归，再真机确认。
+
+## 10. 常见问题排查
+
+### 10.1 NDK 版本不匹配
+
+现象：Gradle 报未安装或版本错误。
+
+解决：安装 `28.0.13004108`，并检查 `ANDROID_NDK_HOME`。
+
+### 10.2 SDK 路径错误
+
+现象：`sdkmanager`、`adb` 不可用。
+
+解决：检查 `ANDROID_SDK` 与 PATH。
+
+### 10.3 Gradle Sync 失败
+
+现象：Android Studio 同步失败。
+
+解决：先运行 `gradlew tasks`，再检查 JDK 17 与网络。
+
+### 10.4 externalNativeBuild 失败
+
+现象：CMake 阶段报错。
+
+解决：检查 ABI 列表、CMake 路径、`ANDROID_NDK_HOME`、`VCPKG_ROOT`。
+
+### 10.5 Windows 下 glib/Meson 路径问题
+
+现象：路径出现 `"/./"`。
+
+解决：修正 `VCPKG_ROOT/downloads/tools/meson-*/mesonbuild/minstall.py` 的 `install_data` 路径逻辑。
+
+## 11. 动手实践
+
+目标：完成一次 Debug 构建并安装。
+
+### 步骤 1：检查变量
+
+Windows：
+
+```powershell
+echo $env:JAVA_HOME
+echo $env:ANDROID_SDK
+echo $env:ANDROID_NDK_HOME
+echo $env:VCPKG_ROOT
+```
+
+Linux/macOS：
+
+```bash
+echo $JAVA_HOME
+echo $ANDROID_SDK
+echo $ANDROID_NDK_HOME
+echo $VCPKG_ROOT
+```
+
+### 步骤 2：检查工具版本
+
+Windows：
+
+```powershell
+java -version
+sdkmanager.bat --version
+adb version
+cmake --version
+ninja --version
+```
+
+Linux/macOS：
+
+```bash
+java -version
+sdkmanager --version
+adb version
+cmake --version
+ninja --version
+```
+
+### 步骤 3：构建 APK
+
+Windows：
+
+```powershell
+.\platforms\android\gradlew.bat -p .\platforms\android clean assembleDebug
+```
+
+Linux/macOS：
+
+```bash
+./platforms/android/gradlew -p ./platforms/android clean assembleDebug
+```
+
+### 步骤 4：安装与启动
+
+Windows：
+
+```powershell
+adb install -r .\platforms\android\out\android\app\outputs\apk\debug\krkr2-1.5.0-all.apk
+adb shell monkey -p org.github.krkr2 -c android.intent.category.LAUNCHER 1
+```
+
+Linux/macOS：
+
+```bash
+adb install -r ./platforms/android/out/android/app/outputs/apk/debug/krkr2-1.5.0-all.apk
+adb shell monkey -p org.github.krkr2 -c android.intent.category.LAUNCHER 1
+```
+
+### 步骤 5：抓日志
+
+Windows：
+
+```powershell
+adb logcat -d | Select-String "org.github.krkr2"
+```
+
+Linux/macOS：
+
+```bash
+adb logcat -d | grep org.github.krkr2
+```
+
+## 12. 对照项目源码
+
+请重点对照以下文件：
+
+- `krkr2/platforms/android/build.gradle`
+- `krkr2/platforms/android/settings.gradle`
+- `krkr2/platforms/android/gradle.properties`
+- `krkr2/platforms/android/app/build.gradle`
+- `krkr2/cmake/vcpkg_android.cmake`
+- `krkr2/vcpkg/triplets/arm64-android.cmake`
+- `krkr2/vcpkg/triplets/x64-android.cmake`
+- `krkr2/vcpkg/triplets/android-dynamic-libs.cmake`
+- `krkr2/CMakePresets.json`
+
+## 13. 本节小结
+
+- Android 构建入口是 Gradle Wrapper。
+- NDK 固定为 `28.0.13004108`。
+- JDK 固定为 17。
+- ABI 策略是 `arm64-v8a + x86_64`。
+- vcpkg 与 Android toolchain 通过 chainload 方式组合。
+
+## 14. 练习题与答案
+
+### 题目 1：为什么必须固定 NDK 版本？
 
 <details>
 <summary>查看答案</summary>
 
-1.  **回答**：因为在 Windows 宿主机上交叉编译 Android 时，Meson 编译系统（常被 glib 等库使用）的一个旧版本实现中存在路径合并漏洞，导致安装路径中出现 `"/./"` 字符而引发错误。开发者需要手动修改 `minstall.py` 文件中的 `install_data` 函数来修复该路径问题。
-2.  **回答**：推荐版本是 **28.0.13004108**。安装时，必须在 Android Studio 的 SDK Tools 选项卡中勾选 "Show Package Details"，才能从列表中精确选择这一特定版本，而不是只安装最新版。
-3.  **回答**：因为项目自带了 **Gradle Wrapper**（位于 `platforms/android` 目录下的 `gradlew` 和 `gradlew.bat`）。它会自动下载并使用项目配置文件中指定的 Gradle 版本，确保所有开发者的构建环境完全一致。
+因为项目已经在 `app/build.gradle` 固定 `ndkVersion '28.0.13004108'`。固定版本可以减少工具链差异，避免“本地能编译、CI 失败”的情况。
 
 </details>
 
+### 题目 2：`ANDROID_ABI=x86_64` 对应哪个 triplet？
 
+<details>
+<summary>查看答案</summary>
+
+对应 `x64-android`，映射规则在 `cmake/vcpkg_android.cmake`。
+
+</details>
+
+### 题目 3：`abiFilters` 与 `splits.abi.include` 不一致会导致什么？
+
+<details>
+<summary>查看答案</summary>
+
+可能导致 APK 缺少某 ABI 的 so，设备运行时会崩溃或无法启动。
+
+</details>
+
+### 题目 4：给出最小 ADB 排障命令。
+
+<details>
+<summary>查看答案</summary>
+
+```bash
+adb start-server
+adb devices -l
+adb install -r <apk-path>
+adb shell monkey -p org.github.krkr2 -c android.intent.category.LAUNCHER 1
+adb logcat -d
+```
+
+</details>
+
+## 15. 下一步
+
+下一节进入首次构建与运行：
+
+- [01-编译项目](../04-第一次构建与运行/01-编译项目.md)

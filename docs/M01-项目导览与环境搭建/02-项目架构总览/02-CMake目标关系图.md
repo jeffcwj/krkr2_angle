@@ -1,99 +1,347 @@
 # CMake 目标关系图
 
-在复杂的 C++ 项目中，理解构建系统（Build System）如何组织代码是至关重要的。KrKr2 使用 CMake 作为跨平台构建工具，并定义了一套清晰的目标（Targets）依赖关系，以确保在不同操作系统下都能高效编译和运行。
+> **所属模块：** M01-项目导览与环境搭建
+> **前置知识：** [01-目录结构与模块职责.md](./01-目录结构与模块职责.md)、P01 现代 CMake 基础
+> **预计阅读时间：** 45 分钟
 
-## 1. 核心目标全貌
+## 本节目标
 
-KrKr2 的 CMake 体系主要围绕以下三个核心目标构建：
+读完本节后，你将能够：
+1. 说清 KrKr2 主目标 `krkr2`、`krkr2core`、`krkr2plugin` 的角色分工。
+2. 理解 INTERFACE/STATIC/SHARED 三类库在本项目中的具体用途。
+3. 读懂 `target_link_libraries` 中 PUBLIC/PRIVATE/INTERFACE 的传播规则。
+4. 根据源码定位每个目标来自哪个 `CMakeLists.txt`。
+5. 自己生成 Graphviz 依赖图，并用图反查构建问题。
 
-- **krkr2**: 最终的产出物。在 Windows/Linux/macOS 上是可执行文件 (.exe 或二进制程序)；在 Android 上则编译为 JNI 调用的共享库 (.so)。
-- **krkr2plugin**: 一个静态库 (**STATIC**)，包含了 `cpp/plugins/` 目录下所有的插件实现。
-- **krkr2core**: 一个接口库 (**INTERFACE**)，它本身不产生编译产物，但它整合了 `cpp/core/` 下所有 9 个核心模块，作为依赖传递的枢纽。
+## 1. 核心目标全貌（保留原结构并增强）
 
-## 2. 目标依赖关系图
+KrKr2 的构建系统可以先记成三层：
 
-以下是 KrKr2 构建目标的逻辑拓扑图：
+- 顶层产物：`krkr2`
+- 聚合层：`krkr2core` 与 `krkr2plugin`
+- 子模块层：`tjs2`、`core_*_module`、插件子库与第三方库
+
+三个关键目标：
+
+- **krkr2**：最终产物。Android 下是 `SHARED`（JNI `.so`），其余平台是 `EXECUTABLE`。
+- **krkr2plugin**：`STATIC` 静态库，统一承载 `cpp/plugins/` 插件实现。
+- **krkr2core**：`INTERFACE` 接口库，不产出 `.a/.lib/.so`，仅传播“依赖合同”。
+
+先看最小心智模型：
 
 ```text
-       [ krkr2 ] (Executable / Shared Library)
-           |
-           +------> [ krkr2plugin ] (STATIC Library)
-           |             |
-           |             +--- psdfile, psbfile, motionplayer, etc.
-           |
-           +------> [ krkr2core ] (INTERFACE Library)
-                         |
-                         +--- tjs2
-                         +--- core_base_module
-                         +--- core_environ_module
-                         +--- core_extension_module
-                         +--- core_plugin_module
-                         +--- core_movie_module
-                         +--- core_sound_module
-                         +--- core_visual_module
-                         +--- core_utils_module
+krkr2
+├─ krkr2plugin (STATIC)
+└─ krkr2core   (INTERFACE)
 ```
 
-### INTERFACE 库 vs STATIC 库的设计思考
+这个模型非常重要：**你调试启动问题看 `krkr2`，调试模块依赖看 `krkr2core`，调试插件编译看 `krkr2plugin`。**
 
-- **STATIC 库 (krkr2plugin)**: 插件代码被编译为 `.a` 或 `.lib` 文件。由于插件数量众多且逻辑相对独立，这种方式可以加快增量编译速度，并且在链接时由链接器决定包含哪些符号。
-- **INTERFACE 库 (krkr2core)**: 核心模块通过 INTERFACE 方式聚合，其主要目的是“依赖传播”。它告诉编译器：如果你链接了 `krkr2core`，那么你也会自动包含核心模块的所有头文件路径和编译选项。这种设计避免了在 `krkr2` 主程序中手动列出所有核心文件夹的繁琐操作。
+## 2. 完整目标依赖图（Mermaid）
 
-## 3. 平台条件编译
+下面这张图基于实际 `CMakeLists.txt` 整理，覆盖主目标、核心模块、插件子库与关键第三方依赖。
 
-在根目录的 `CMakeLists.txt` 中，KrKr2 通过条件分支来处理不同平台的特殊需求。
+```mermaid
+graph TD
+    A[krkr2<br/>Android: SHARED<br/>Win/Linux/macOS: EXECUTABLE]
+    B[krkr2core<br/>INTERFACE]
+    C[krkr2plugin<br/>STATIC]
 
-注意：KrKr2 使用了自定义定义的 CMake 变量（WINDOWS, LINUX, MACOS, ANDROID）来进行分支控制，这比标准的 `CMAKE_SYSTEM_NAME` 更直观：
+    A --> B
+    A --> C
+
+    B --> T[tjs2]
+    B --> CB[core_base_module]
+    B --> CE[core_environ_module]
+    B --> CX[core_extension_module]
+    B --> CP[core_plugin_module]
+    B --> CM[core_movie_module]
+    B --> CS[core_sound_module]
+    B --> CV[core_visual_module]
+    B --> CU[core_utils_module]
+    B --> CO[cocos2dx::cocos2d]
+    B --> OMP[OpenMP::OpenMP_CXX<br/>非 Apple]
+    B --> ANDROID_SYS[log/android/EGL/GLES/OpenSLES<br/>仅 Android]
+
+    C --> PSD[psdfile]
+    C --> PSB[psbfile]
+    C --> LXD[layerExDraw]
+    C --> MP[motionplayer]
+    C --> FS[fstat]
+    C --> FMT1[fmt::fmt]
+    C --> SPD1[spdlog::spdlog]
+    C --> B
+
+    T --> BOOST[Boost::locale]
+    T --> FMT2[fmt::fmt]
+    T --> SPD2[spdlog::spdlog]
+    T --> ONIG[oniguruma::onig]
+
+    CB --> UCHARDET[uchardet::libuchardet]
+    CB --> UNRAR[unrar::unrar]
+    CB --> ARCHIVE[LibArchive::LibArchive]
+    CB --> ZSTD[zstd::libzstd]
+    CB --> SDL2[SDL2]
+
+    CM --> FFMPEG[FFMPEG av*]
+    CS --> OPENAL[OpenAL::OpenAL]
+    CS --> VORBIS[Vorbis]
+    CS --> OPUS[Opus/OpusFile]
+    CV --> WEBP[WebP]
+    CV --> JXR[JXR]
+    CV --> JPEG[libjpeg-turbo]
+    CV --> OPENCV[OpenCV core/imgproc]
+    CV --> LZ4[lz4::lz4]
+```
+
+阅读技巧：从 `krkr2` 向下看是“最终链接链路”，从某个模块向上看是“能力被谁消费”。
+
+## 3. CMake 目标类型速通：INTERFACE / STATIC / SHARED
+
+这是 C++ 开发者最容易混淆的部分。你可以把它理解成“产物类型 + 传播行为”的组合。
+
+| 类型 | 是否产出二进制文件 | 是否包含源码编译 | 典型用途 | KrKr2 示例 |
+|---|---|---|---|---|
+| `INTERFACE` | 否 | 否 | 传播头文件、宏、链接依赖 | `krkr2core` |
+| `STATIC` | 是（`.a/.lib`） | 是 | 模块封装、加速增量编译 | `krkr2plugin`、`tjs2`、`core_*_module` |
+| `SHARED` | 是（`.so/.dll/.dylib`） | 是 | 动态加载或平台要求 | Android 下 `krkr2` |
+
+### 3.1 INTERFACE（接口库）到底在“做什么”
+
+`INTERFACE` 目标不编译 `.cpp`。它更像“规则集合”或“依赖清单”：
+
+- 我需要哪些头文件目录（`target_include_directories(... INTERFACE ...)`）
+- 我要求哪些编译宏（`target_compile_definitions(... INTERFACE ...)`）
+- 我依赖哪些目标（`target_link_libraries(... INTERFACE ...)`）
+
+当 `krkr2` 链接 `krkr2core` 后，`krkr2core` 声明的依赖会继续向上传播，等价于“把九个核心模块一次性打包成一个可复用依赖入口”。
+
+### 3.2 STATIC（静态库）在 KrKr2 里的意义
+
+`STATIC` 库会编译出对象集合，链接时合入最终产物。KrKr2 把绝大部分业务模块做成静态库，有三个直接收益：
+
+1. 模块边界清晰：每个 `core_*_module` 单独维护。
+2. 增量构建快：改一个模块只重编该模块。
+3. 跨平台稳定：减少动态装载差异带来的运行时问题。
+
+### 3.3 SHARED（共享库）为何只在 Android 作为主目标
+
+Android App 通过 JNI 加载 native 层，所以根目标 `krkr2` 在 Android 分支被定义为：
 
 ```cmake
-if(WINDOWS)
-    # Windows 特定的源文件（如 WinMain.cpp）和库依赖
-elseif(LINUX)
-    # Linux 特定的 X11 或 SDL2 依赖
-elseif(ANDROID)
-    # Android JNI 配置、NDK 工具链设置
-elseif(MACOS)
-    # Apple 平台的 Bundle 配置与 Info.plist
+if(ANDROID)
+    add_library(${PROJECT_NAME} SHARED platforms/android/cpp/krkr2_android.cpp)
 endif()
 ```
 
-## 4. CMake 预设 (CMakePresets.json)
+这不是“风格选择”，是平台集成方式决定：Java/Kotlin 侧通常 `System.loadLibrary("krkr2")` 加载 `.so`。
 
-为了简化繁琐的命令行构建参数，KrKr2 使用了 **CMake Presets**。这是一种标准的 JSON 格式文件，它定义了针对不同平台和编译类型的“一键配置”。
+## 4. `target_link_libraries` 传播规则：PUBLIC / PRIVATE / INTERFACE
 
-常见的预设包括：
+这一节是“读懂任何 CMake 工程”的关键。很多“为什么我 include 不到头文件”问题都出在这里。
 
-- **Windows Debug / Release**: 使用 MSVC 编译器，generator 为 `Ninja`，binary 目录位于 `build/windows-debug`。
-- **Linux Debug / Release**: 适配 GCC/Clang，同样使用 `Ninja` 构建系统以获得更快的编译速度。
-- **MacOS Debug / Release**: 配置苹果平台的 Bundle 路径和 SDK 设置。
+### 4.1 三个关键字的语义
 
-### 预设的内容分析
+- `PRIVATE`：只对当前目标生效，不向依赖者传播。
+- `PUBLIC`：当前目标生效，同时向依赖者传播。
+- `INTERFACE`：不用于当前目标编译，只向依赖者传播。
 
-在 `CMakePresets.json` 中，你会看到类似的配置项：
+### 4.2 结合 KrKr2 实例理解
 
-- **generator**: Ninja（轻量级构建系统，编译速度极快）。
-- **binaryDir**: `${sourceDir}/out/build/${presetName}`（指定编译中间产物存放位置）。
-- **cacheVariables**:
-  - `CMAKE_BUILD_TYPE`: Debug 或 Release。
-  - `VCPKG_TARGET_TRIPLET`: 如 `x64-windows` 或 `x64-linux`，指示 vcpkg 使用哪套库。
+`krkr2` 链接时使用：
 
-## 练习题与答案
+```cmake
+target_link_libraries(${PROJECT_NAME} PUBLIC
+    krkr2plugin krkr2core
+)
+```
 
-1. **选择题**：KrKr2 中的 `krkr2core` 目标在 CMake 中被定义为什么类型的库？
-   A. STATIC（静态库）
-   B. SHARED（动态库）
-   C. INTERFACE（接口库）
-   D. EXECUTABLE（可执行程序）
+解释：
 
-2. **填空题**：KrKr2 使用自定义的 CMake 变量 ______ 来区分 Android 平台的编译逻辑。
+1. `krkr2` 自己要链接 `krkr2plugin` 和 `krkr2core`。
+2. 如果未来有别的目标再链接 `krkr2`，这些依赖关系也可继续传播。
 
-3. **简答题**：为什么 KrKr2 选择使用 `Ninja` 作为 CMake 预设中的生成器（Generator）？
+再看 `krkr2core`：
 
-<details>
-<summary>查看答案</summary>
+```cmake
+target_link_libraries(${PROJECT_NAME} INTERFACE
+    tjs2
+    core_base_module
+    core_environ_module
+    core_extension_module
+    core_plugin_module
+    core_movie_module
+    core_sound_module
+    core_visual_module
+    core_utils_module
+)
+```
 
-1. **C**（krkr2core 作为一个 INTERFACE 库，主要用于聚合和传递依赖）。
-2. **ANDROID**（在 CMakeLists.txt 中通过 `if(ANDROID)` 进行条件分支判断）。
-3. **回答**：`Ninja` 相比传统的 `Make` 或 `Visual Studio Solution` 更加轻量且专注于速度。它能更智能地处理依赖并行计算，极大地缩短了大型项目（如 KrKr2）的编译和链接时间。
+这是典型“接口聚合器”：`krkr2core` 自己不编译源码，所以用 `INTERFACE` 合理且高效。
 
-</details>
+### 4.3 一个常见误区
+
+很多人会把 `INTERFACE` 误认为“头文件库”。其实它可以传播的不只有头文件，还有：
+
+- 编译宏（如 `TJS_TEXT_OUT_CRLF`）
+- 编译选项（如 OpenMP flags）
+- 链接依赖（比如 `cocos2dx::cocos2d`）
+
+因此在 KrKr2 中，`krkr2core` 是“构建策略中枢”，不是单纯“include 集合”。
+
+## 5. 主目标 `krkr2`：跨平台产物分支
+
+根 `CMakeLists.txt` 的主目标逻辑非常清晰：按平台切换入口文件和目标类型。
+
+```cmake
+if(ANDROID)
+    add_library(${PROJECT_NAME} SHARED platforms/android/cpp/krkr2_android.cpp)
+elseif(LINUX)
+    add_executable(${PROJECT_NAME} platforms/linux/main.cpp)
+elseif(WINDOWS)
+    add_executable(${PROJECT_NAME}
+        platforms/windows/main.cpp
+        platforms/windows/game.rc
+    )
+elseif(MACOS)
+    add_executable(${PROJECT_NAME}
+        platforms/apple/macos/main.cpp
+        platforms/apple/macos/Prefix.pch
+        ${APP_UI_RES}
+    )
+endif()
+```
+
+### 5.1 平台差异对照
+
+| 平台 | 目标类型 | 入口源文件 | 典型产物 |
+|---|---|---|---|
+| Android | `SHARED` | `platforms/android/cpp/krkr2_android.cpp` | `libkrkr2.so` |
+| Windows | `EXECUTABLE` | `platforms/windows/main.cpp` + `game.rc` | `krkr2.exe` |
+| Linux | `EXECUTABLE` | `platforms/linux/main.cpp` | `krkr2` |
+| macOS | `EXECUTABLE`（Bundle 配置） | `platforms/apple/macos/main.cpp` | `.app` 内可执行文件 |
+
+### 5.2 为什么文档里常说“krkr2 是最终链接汇点”
+
+因为它最终链接了：
+
+- 项目插件聚合库 `krkr2plugin`
+- 项目核心聚合库 `krkr2core`
+- 通过以上两个入口传播来的所有核心模块和第三方库
+
+你可以把它理解为“构建图的根节点（root of link graph）”。
+
+## 6. `krkr2core`：INTERFACE 聚合器如何整合九大核心模块
+
+`cpp/core/CMakeLists.txt` 中先声明：
+
+```cmake
+add_library(${PROJECT_NAME} INTERFACE)
+```
+
+然后把 9 个子模块通过 `add_subdirectory` 引入，再统一 `target_link_libraries(... INTERFACE ...)`。
+
+### 6.1 九个核心模块一览（来自实际目标名）
+
+1. `tjs2`：脚本引擎
+2. `core_base_module`：归档、流、事件、KAG 解析
+3. `core_environ_module`：平台抽象、AppDelegate、UI
+4. `core_extension_module`：扩展接口
+5. `core_plugin_module`：插件桥接与绑定
+6. `core_movie_module`：FFmpeg 视频链路
+7. `core_sound_module`：音频解码与播放
+8. `core_visual_module`：图像与渲染
+9. `core_utils_module`：线程、计时、随机等工具
+
+### 6.2 传播给上层的不仅是模块依赖
+
+`krkr2core` 还传播：
+
+- include 路径：`${CMAKE_CURRENT_SOURCE_DIR}`
+- 编译宏：`TJS_TEXT_OUT_CRLF`、`__STDC_CONSTANT_MACROS`、`USE_UNICODE_FSTRING`
+- 平台附加依赖：Android 系统库、非 Apple 的 OpenMP
+- 图形底座：`cocos2dx::cocos2d`
+
+### 6.3 这套设计带来的工程收益
+
+- 根目标更干净：`krkr2` 不必列出 9 个模块。
+- 模块替换更低成本：新增/移除核心模块只改 `cpp/core/CMakeLists.txt`。
+- 教学可解释性强：读者通过一个目标就能掌握核心体系。
+
+## 7. `krkr2plugin`：插件聚合目标的构建方式
+
+`cpp/plugins/CMakeLists.txt` 定义了：
+
+```cmake
+project(krkr2plugin)
+add_library(${PROJECT_NAME} STATIC)
+```
+
+之后分两类收集插件代码：
+
+1. **根目录直接源文件**：通过 `target_sources(krkr2plugin ...)` 加入。
+2. **子目录插件目标**：先 `add_subdirectory` 生成子库，再链接到 `krkr2plugin`。
+
+### 7.1 当前启用的子插件目标
+
+- `psdfile`
+- `psbfile`
+- `layerExDraw`
+- `motionplayer`
+- `fstat`
+
+被注释（未启用）的有 `json`、`steam`、`DrawDeviceForSteam`。
+
+### 7.2 一个容易忽略的结构特点
+
+子插件（例如 `psdfile`）会 `target_link_libraries(... PRIVATE krkr2plugin)`；
+同时父插件聚合库又链接这些子插件。初看像循环，但在静态库场景中它更多体现为“共享编译上下文 + 最终由主程序统一链接”。
+
+### 7.3 与核心层的关系
+
+`krkr2plugin` 通过：
+
+```cmake
+target_link_libraries(${PROJECT_NAME} PUBLIC krkr2core)
+```
+
+获得核心 API 与头文件传播能力。换句话说：插件层是“功能扩展层”，核心层是“运行时能力层”。
+
+## 8. 从核心子模块看“依赖网络”而非“单向链”
+
+很多入门文档只画树状结构，但 KrKr2 的核心模块之间存在交叉引用。下面用“职责 + 主要依赖”方式快速建立全局认知。
+
+### 8.1 `tjs2`（脚本引擎基石）
+
+- 类型：`STATIC`
+- 职责：词法/语法、字节码、对象系统、正则
+- 三方依赖：Boost::locale、fmt、spdlog、oniguruma
+
+### 8.2 `core_base_module`
+
+- 类型：`STATIC`
+- 职责：归档格式（XP3/ZIP/TAR/7z）、流系统、事件、脚本管理
+- 典型依赖：`tjs2`（PUBLIC），以及视觉/插件/环境等（PRIVATE）
+
+### 8.3 `core_environ_module`
+
+- 类型：`STATIC`
+- 职责：平台层（android/linux/win32/macos）+ Cocos AppDelegate + UI
+- 典型依赖：`tjs2`（PUBLIC），`cocos2dx::cocos2d`、`7zip::7zip`、`minizip`
+
+### 8.4 `core_movie_module` 与 `core_sound_module`
+
+- `core_movie_module`：FFmpeg 视频解复用与渲染链路
+- `core_sound_module`：OpenAL + Vorbis/Opus 音频链路
+- 二者存在交叉依赖关系（一个处理视频，一个处理音频，运行时协同）
+
+### 8.5 `core_visual_module`
+
+- 类型：`STATIC`
+- 职责：图像解码、图层管理、渲染
+- 依赖多：WebP、JXR、libjpeg-turbo、OpenCV、lz4、libbpg
+
+### 8.6 `core_utils_module` 与 `core_extension_module`
+
+- `core_utils_module`：线程、定时器、剪贴板、随机数等基础设施
+- `core_extension_module`：扩展接口实现（体量小，但在架构上承担可扩展入口）

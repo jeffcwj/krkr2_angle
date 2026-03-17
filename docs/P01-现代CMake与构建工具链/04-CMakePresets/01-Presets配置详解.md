@@ -1,5 +1,21 @@
 # 01-Presets配置详解
 
+> **所属模块：** P01-现代CMake与构建工具链  
+> **前置知识：** `../03-构建类型与编译选项/`、`../02-CMake目标与链接/`  
+> **预计阅读时间：** 45 分钟
+
+## 本节目标
+
+读完本节后，你将能够：
+
+1. 理解 Presets 在团队构建中的价值。
+2. 区分 `CMakePresets.json` 与 `CMakeUserPresets.json` 的职责。
+3. 理解 JSON Schema 版本与 CMake 兼容性关系。
+4. 系统掌握 `configurePresets`、`buildPresets`、`testPresets` 字段。
+5. 使用 `inherits + hidden` 搭建可复用预设体系。
+6. 使用 `condition`、`$env{}`、`$penv{}`、宏展开处理跨平台差异。
+7. 能逐行读懂 KrKr2 的 `krkr2/CMakePresets.json`。
+
 在前面的章节中，你已经学会了如何编写 `CMakeLists.txt`，管理变量、目标和属性。然而在实际开发中，你可能会发现每次配置项目时都要输入一大串命令：
 
 ```bash
@@ -35,95 +51,132 @@ CMake 识别两个预设文件：
    - **版本控制**：**严禁**提交到版本控制系统（应加入 `.gitignore`）。
    - **优先级**：会覆盖或补充 `CMakePresets.json` 中的同名预设。
 
+实战建议：
+
+- 团队默认配置一定放在 `CMakePresets.json`，这样 CI、IDE、命令行都统一。
+- 个人磁盘路径、本机 SDK 路径放在 `CMakeUserPresets.json`，避免污染仓库。
+
 ---
 
-## JSON 结构详解
+## JSON Schema 版本和兼容性
 
-一个标准的 `CMakePresets.json` 文件由几个核心字段组成：
+`CMakePresets.json` 顶层 `version` 字段表示 **Presets 文件格式版本**，不是 CMake 可执行程序版本。
+
+KrKr2 使用的是：
 
 ```json
-{
-  "version": 6,
-  "cmakeMinimumRequired": {
-    "major": 3,
-    "minor": 28,
-    "patch": 0
-  },
-  "configurePresets": [],
-  "buildPresets": [],
-  "testPresets": [],
-  "workflowPresets": []
+"version": 6
+```
+
+同时还声明了最低 CMake 版本：
+
+```json
+"cmakeMinimumRequired": {
+  "major": 3,
+  "minor": 28,
+  "patch": 0
 }
 ```
 
-- **`version`**：JSON 格式的版本号。建议使用较新版本（如 6），以支持更多特性。
-- **`cmakeMinimumRequired`**：指定运行此预设所需的最低 CMake 版本。
-- **`configurePresets`**：**最核心的部分**，定义配置阶段（生成 Makefile/Ninja 文件的阶段）的参数。
-- **`buildPresets`**：定义构建阶段（编译代码的阶段）的参数，必须关联一个 `configurePreset`。
+兼容性检查顺序：
+
+1. `cmake --version` 是否满足 `3.28.0+`。
+2. IDE 内置 CMake 版本是否一致。
+3. 再检查 JSON 字段拼写。
+
+跨平台提示：
+
+- Windows：VS 内置 CMake 可能落后。
+- Linux：系统仓库可能提供旧版 CMake。
+- macOS：Homebrew 安装后注意 PATH 优先级。
+- Android：上层工具链调用的 CMake 也要满足最低版本。
 
 ---
 
-## configurePreset 字段详解
+## configurePresets 完整字段详解
 
 每一个配置预设都是一个对象，包含以下常用字段：
 
 ### 1. 基础信息
-- **`name`**：预设的唯一标识名。
-- **`hidden`**：布尔值。如果为 `true`，该预设不会出现在 IDE 的选择列表中，通常用作被其他预设继承的基础预设。
-- **`inherits`**：字符串或数组，表示继承自哪些预设。
-- **`generator`**：指定生成器，如 `"Ninja"` 或 `"Visual Studio 17 2022"`。
+- **`name`**：预设唯一标识名。
+- **`hidden`**：若为 `true`，预设会被隐藏，常用作模板。
+- **`inherits`**：继承父预设（字符串或数组）。
+- **`generator`**：生成器，如 `Ninja`。
 
 ### 2. 目录与变量
-- **`binaryDir`**：指定构建目录（输出目录），支持变量替换，如 `"${sourceDir}/out/build/${presetName}"`。
-- **`cacheVariables`**：一个对象，定义 CMake 缓存变量（即 `-D` 参数）。
-  ```json
-  "cacheVariables": {
-    "CMAKE_BUILD_TYPE": "Debug",
-    "MY_FEATURE_ENABLED": "ON"
-  }
-  ```
-
-### 3. 环境与条件
-- **`condition`**：条件表达式。只有满足条件时，该预设才可用。例如只在 Windows 上启用。
-- **`architecture`**：指定目标架构，主要用于 Visual Studio 生成器（如 `x64`, `arm64`）。
-- **`vendor`**：供应商特定设置，例如为特定的 IDE 提供额外提示。
-
----
-
-## 继承（inherits）与代码复用
-
-在实际项目中，你可能会发现 Windows Debug 和 Windows Release 有很多重复的配置（如都要用 Ninja、都要定义特定的宏）。通过 `inherits` 机制，你可以消除重复代码。
+- **`binaryDir`**：构建目录，支持宏，例如 `${sourceDir}`、`${presetName}`。
+- **`cacheVariables`**：等价命令行 `-D` 参数。
 
 ```json
-{
-  "configurePresets": [
-    {
-      "name": "Base Config",
-      "hidden": true,
-      "generator": "Ninja",
-      "cacheVariables": {
-        "PROJECT_VERSION": "1.0.0"
-      }
-    },
-    {
-      "name": "Windows Debug",
-      "inherits": "Base Config",
-      "binaryDir": "${sourceDir}/out/debug",
-      "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "Debug"
-      }
-    }
-  ]
+"cacheVariables": {
+  "CMAKE_BUILD_TYPE": "Debug",
+  "CMAKE_EXPORT_COMPILE_COMMANDS": true
 }
 ```
 
-在上例中，`Windows Debug` 预设会自动继承 `Base Config` 中的生成器（Ninja）和项目版本变量。
+### 3. 环境与条件
+- **`condition`**：决定预设是否可见/可用。
+- **`architecture`**：目标架构声明。
+- **`vendor`**：IDE 厂商扩展信息。
+- **`environment`**：预设环境变量。
+- **`toolchainFile`**：工具链文件路径。
+- **`installDir`**：安装目录。
 
 ---
 
-## condition 字段详解
+## buildPresets 和 testPresets 详解
 
-为了实现跨平台支持，你可以使用 `condition` 字段让预设只在特定环境下生效。
+`buildPresets` 常见最小写法：
+
+```json
+{
+  "name": "Windows Debug Build",
+  "configurePreset": "Windows Debug Config"
+}
+```
+
+含义：构建阶段直接复用 configure 预设确定的生成器、目录、缓存变量。
+
+`testPresets` 典型模板：
+
+```json
+{
+  "name": "Linux Debug Test",
+  "configurePreset": "Linux Debug Config",
+  "output": {
+    "outputOnFailure": true
+  },
+  "execution": {
+    "jobs": 8
+  }
+}
+```
+
+在 KrKr2 当前文件中暂未定义 `testPresets`，后续可按上述模式扩展。
+
+---
+
+## 继承机制：inherits 与 hidden 组合
+
+推荐结构：
+
+1. 平台基座预设 `hidden: true`。
+2. Debug/Release 子预设继承基座。
+3. 子预设仅覆盖差异字段。
+
+优点：
+
+- 公共字段只维护一次。
+- 改动影响面可预测。
+- 用户入口更清晰。
+
+KrKr2 的 Windows/Linux/macOS 都采用了该模式。
+
+---
+
+## 条件预设：condition 字段
+
+典型写法：
 
 ```json
 "condition": {
@@ -133,75 +186,200 @@ CMake 识别两个预设文件：
 }
 ```
 
-- **`type`**：条件类型。常用有 `equals`（等于）、`notEquals`（不等于）、`anyOf`（任一满足）、`allOf`（全部满足）。
-- **`lhs`**（Left Hand Side）：左值，通常是一个内置变量（如 `${hostSystemName}`）。
-- **`rhs`**（Right Hand Side）：右值。
+常见 `type`：
 
-常用的内置变量包括：
-- `${sourceDir}`：项目源码根目录。
-- `${presetName}`：当前预设的名称。
-- `${hostSystemName}`：宿主系统名称，如 `"Windows"`, `"Linux"`, `"Darwin"` (macOS)。
+- `equals`
+- `notEquals`
+- `allOf`
+- `anyOf`
+
+KrKr2 使用值：
+
+- Windows → `Windows`
+- Linux → `Linux`
+- macOS → `Darwin`
 
 ---
 
-## 使用 Presets 进行构建
+## 环境变量引用与宏展开
 
-配置好 JSON 后，你再也不需要输入长长的参数。只需使用以下命令：
+### 环境变量引用
 
-1. **配置（Configure）**：
-   ```bash
-   cmake --preset "Windows Debug Config"
-   ```
-   这会自动根据预设名在 JSON 中查找对应的生成器、变量和构建目录。
+- `$env{VAR}`：读取当前预设环境变量。
+- `$penv{VAR}`：读取父进程环境变量。
 
-2. **构建（Build）**：
-   ```bash
-   cmake --build --preset "Windows Debug Build"
-   ```
-   构建预设会自动关联其对应的配置预设，从而知道去哪个目录下寻找构建文件。
+常见用途：
+
+1. 继承 `PATH`。
+2. 读取 `VCPKG_ROOT`。
+3. 读取 `ANDROID_NDK`。
+
+### 宏展开
+
+常见宏：
+
+- `${sourceDir}`
+- `${presetName}`
+- `${hostSystemName}`
+
+示例：
+
+```json
+"binaryDir": "${sourceDir}/out/build/${presetName}"
+```
+
+---
+
+## KrKr2 的 CMakePresets.json 逐行解读（实战案例）
+
+文件路径：`krkr2/CMakePresets.json`  
+文件行数：156 行
+
+### 顶层（1-7）
+
+- 第2行：`version = 6`
+- 第3-7行：`cmakeMinimumRequired = 3.28.0`
+
+### configurePresets（8-129）
+
+1. `Windows Config`（10）
+   - `generator`: Ninja（11）
+   - `hidden`: true（12）
+   - `cacheVariables`: WINDOWS、VCPKG_TARGET_TRIPLET、CMAKE_EXPORT_COMPILE_COMMANDS（13-17）
+   - `condition`: Windows（18-22）
+   - `architecture`: x64（23-26）
+   - `vendor`: Visual Studio 扩展（27-31）
+
+2. `Windows Debug Config`（34）和 `Windows Release Config`（42）
+   - 继承 `Windows Config`
+   - 输出目录分别为 `out/windows/debug`、`out/windows/release`
+   - 分别覆盖 `CMAKE_BUILD_TYPE`
+
+3. `Windows MinGW Config`（50）
+   - 在 Linux 主机交叉编译 Windows
+   - 指定 MinGW 编译器
+   - `condition` 限制 Linux
+
+4. `Linux Config` 与子预设（68-96）
+   - 基座隐藏
+   - 子预设拆分 Debug/Release
+
+5. `MacOS Config` 与子预设（98-128）
+   - `condition` 使用 `Darwin`
+   - 指定 `clang`、`clang++`
+
+### buildPresets（130-155）
+
+- 共 6 个 build 预设
+- 覆盖三平台 Debug/Release
+- 每个条目绑定对应 configure 预设
+
+命令映射：
+
+```bash
+cmake --preset "Linux Debug Config"
+cmake --build --preset "Linux Debug Build"
+```
+
+---
+
+## 动手实践
+
+目标：新增 Linux ASan 调试预设。
+
+### 第1步：新增隐藏基座
+
+```json
+{
+  "name": "Linux ASan Base",
+  "inherits": "Linux Config",
+  "hidden": true,
+  "cacheVariables": {
+    "CMAKE_BUILD_TYPE": "Debug",
+    "CMAKE_C_FLAGS": "-fsanitize=address -fno-omit-frame-pointer",
+    "CMAKE_CXX_FLAGS": "-fsanitize=address -fno-omit-frame-pointer",
+    "CMAKE_EXE_LINKER_FLAGS": "-fsanitize=address"
+  }
+}
+```
+
+### 第2步：新增 configure 预设
+
+```json
+{
+  "name": "Linux ASan Debug Config",
+  "inherits": "Linux ASan Base",
+  "binaryDir": "${sourceDir}/out/linux/asan-debug"
+}
+```
+
+### 第3步：新增 build 预设
+
+```json
+{
+  "name": "Linux ASan Debug Build",
+  "configurePreset": "Linux ASan Debug Config"
+}
+```
+
+### 第4步：执行验证
+
+```bash
+cmake --preset "Linux ASan Debug Config"
+cmake --build --preset "Linux ASan Debug Build"
+ctest --test-dir out/linux/asan-debug --output-on-failure
+```
+
+验证点：
+
+1. `Linux ASan Debug Config` 可见。
+2. `Linux ASan Base` 不可见。
+3. 编译参数中出现 `-fsanitize=address`。
+4. 输出目录是 `out/linux/asan-debug`。
+
+---
+
+## 本节小结
+
+- Presets 把临时命令参数升级为可管理配置资产。
+- `CMakePresets.json` 面向团队，`CMakeUserPresets.json` 面向个人。
+- `configurePresets` 负责定义，`buildPresets/testPresets` 负责执行。
+- `inherits + hidden` 是去重和分层关键模式。
+- `condition`、环境变量引用、宏展开是跨平台关键能力。
+- KrKr2 的预设文件结构可直接作为扩展模板。
 
 ---
 
 ## 练习题与答案
 
-### 题目 1：理解 `hidden` 属性
+### 题目1：基座预设为什么设置 hidden
 
-如果你在 `CMakePresets.json` 中定义了一个 `hidden: true` 的预设，为什么在 VS Code 的 CMake Tools 插件的下拉列表中找不到它？
+为什么 `Windows Config`、`Linux Config` 这类预设通常设置 `hidden: true`？
 
 <details>
 <summary>查看答案</summary>
 
-`hidden` 属性的作用就是将该预设标记为"内部预设"。它主要用于作为其他预设的基础模板（通过 `inherits` 继承），而不直接供用户手动选择和运行。IDE 和 `cmake --list-presets` 都会自动隐藏这些预设。
+因为它们主要承载公共字段，不是最终执行入口。设置 hidden 可以避免误选模板预设，让用户只看到可直接执行的 Debug/Release 入口。
 
 </details>
 
-### 题目 2：配置构建目录
+### 题目2：个人路径应写在哪个文件
 
-请写出一个 `configurePreset` 片段，要求该预设继承自 `base`，并且将构建输出目录设置为项目根目录下的 `build_output` 文件夹。
+你要把本机构建目录改为 `D:/build/krkr2`，应修改哪个文件？
 
 <details>
 <summary>查看答案</summary>
 
-```json
-{
-  "name": "my-preset",
-  "inherits": "base",
-  "binaryDir": "${sourceDir}/build_output"
-}
-```
-
-关键点：`${sourceDir}` 是 CMake Presets 内置变量，指向项目根目录（即 `CMakePresets.json` 所在目录）。
+应写在 `CMakeUserPresets.json`。这是个人机器差异，不应写入团队共享的 `CMakePresets.json`。
 
 </details>
 
-### 题目 3：跨平台条件判断
+### 题目3：写出 macOS 的 condition
 
-如何配置一个预设，使其仅在 macOS 系统上生效？
+请给出仅在 macOS 可见的 condition 片段。
 
 <details>
 <summary>查看答案</summary>
-
-在 `configurePresets` 的对象中加入如下 `condition` 字段：
 
 ```json
 "condition": {
@@ -211,7 +389,16 @@ CMake 识别两个预设文件：
 }
 ```
 
-注意：CMake 将 macOS 识别为 `Darwin`（其底层内核名称），而不是 `MacOS` 或 `macOS`。
-
 </details>
 
+---
+
+## 下一步
+
+继续阅读：[02-多平台预设管理.md](./02-多平台预设管理.md)。
+
+下一节重点：
+
+1. 多平台预设命名规范。
+2. 平台层与功能层拆分策略。
+3. 本地预设与 CI 预设对齐方法。

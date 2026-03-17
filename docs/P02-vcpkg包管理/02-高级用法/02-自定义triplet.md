@@ -1,180 +1,396 @@
-# 02-自定义 Triplet (架构-系统-链接方式)
+# 02-自定义 Triplet（架构-系统-链接方式）
 
-在 vcpkg 的世界里，**Triplet** 是一个极其核心的概念。如果你掌握了 Triplet，你就掌握了 vcpkg 在不同平台、不同编译环境下自由切换的“黑魔法”。
+> **所属模块：** P02-vcpkg包管理 / 02-高级用法  
+> **前置知识：** [01-overlay-ports.md](./01-overlay-ports.md)  
+> **预计阅读时间：** 30-40 分钟  
+> **后续章节：** [03-二进制缓存.md](./03-二进制缓存.md)  
+> **适用平台：** Windows / Linux / macOS / Android
 
-## 什么是 Triplet
+Triplet 是 vcpkg 最核心的配置对象之一。  
+你在命令里写的 `x64-windows`、`arm64-android`，本质上都对应一个 `.cmake` 文件。  
+这个文件会告诉 vcpkg：目标系统是什么、架构是什么、库要静态还是动态、是否需要链式工具链、是否传入额外编译参数。
 
-Triplet（三元组）本质上是一个简单的文本文件名，它定义了库应该如何被编译和链接。一个标准的 Triplet 名称通常由以下三部分组成：
+很多人把 Triplet 当作“固定枚举值”，这是误区。  
+在项目实践里，Triplet 可以自定义，并且经常需要自定义，尤其是 Android、混合链接策略、跨平台统一构建场景。
 
-`[目标架构]-[目标操作系统]-[链接方式]`
+## 本节目标
 
-例如：
--   `x64-windows`：64位 Windows，动态链接。
--   `x64-windows-static`：64位 Windows，静态链接。
--   `arm64-android`：64位 Android。
--   `x64-linux`：64位 Linux。
--   `x64-osx`：64位 macOS。
+读完本节后，你将能够：
 
-## vcpkg 内置 Triplet 列表
+1. 准确解释 Triplet 的三元组语义：平台 + 架构 + 链接方式。
+2. 识别常见内置 Triplet，并理解其适用场景。
+3. 掌握 Triplet 文件常见字段及含义。
+4. 从零创建并启用自定义 Triplet。
+5. 使用 overlay-triplets 让 vcpkg 识别项目内 Triplet。
+6. 结合 KrKr2 的 `vcpkg_android.cmake` 理解 Android Triplet 特殊配置。
+7. 根据工程目标选择静态链接与动态链接策略。
 
-你可以通过运行以下命令查看 vcpkg 内置的所有 Triplet：
+## 1. Triplet 是什么
+
+Triplet（三元组）可以理解为“依赖构建配置模板”。  
+同一个依赖包，使用不同 Triplet 构建，最终产物会不同。  
+例如 `zlib:x64-windows` 与 `zlib:x64-windows-static`，虽然都是 zlib，但链接模型和运行时约束不同。
+
+常见命名模式是：
+
+`[架构]-[平台]-[链接倾向]`
+
+示例：
+
+- `x64-windows`
+- `x64-windows-static`
+- `x64-linux`
+- `arm64-android`
+- `arm64-osx`
+
+你可以把 Triplet 看成“目标二进制合同（contract）”。  
+只要合同变了，依赖编译结果就可能变化，因此构建缓存、ABI 兼容、部署策略都会被影响。
+
+## 2. 内置 Triplet 列表与含义
+
+查看内置列表：
 
 ```bash
 vcpkg help triplets
 ```
 
-常见的内置 Triplet 包括：
--   **Windows**: `x86-windows`, `x64-windows`, `x64-windows-static`
--   **Linux**: `x64-linux`, `arm64-linux`
--   **macOS**: `x64-osx`, `arm64-osx`
--   **Android**: `arm64-android`, `x64-android`
+典型内置项（按平台分组）：
 
-## Triplet 文件中可以设置的变量
+- Windows：`x86-windows`、`x64-windows`、`x64-windows-static`、`arm64-windows`
+- Linux：`x64-linux`、`arm64-linux`、`arm-linux`
+- macOS：`x64-osx`、`arm64-osx`
+- Android：`arm64-android`、`arm-android`、`x64-android`、`x86-android`
 
-Triplet 文件实际上是一个 CMake 脚本。你可以在其中设置一系列 `VCPKG_` 开头的变量来控制编译行为：
+这些 Triplet 覆盖了大部分通用场景，但不代表能满足所有项目。  
+例如你需要固定 Android API Level、只构建 Release、局部端口动态链接时，往往必须自定义。
 
-| 变量名 | 说明 |
-| :--- | :--- |
-| `VCPKG_TARGET_ARCHITECTURE` | 目标架构（x64, x86, arm64, arm） |
-| `VCPKG_CRT_LINKAGE` | C 运行时链接方式（static, dynamic） |
-| `VCPKG_LIBRARY_LINKAGE` | 库的链接方式（static, dynamic） |
-| `VCPKG_CMAKE_SYSTEM_NAME` | 目标系统名（Windows, Linux, Darwin, Android, iOS） |
-| `VCPKG_CMAKE_SYSTEM_VERSION` | 目标系统版本（例如 Android 的 API Level） |
-| `VCPKG_BUILD_TYPE` | 编译类型（release, debug, 为空则两者都编） |
+## 3. Triplet 文件常见字段
 
-## 为什么需要自定义 Triplet
+Triplet 文件是 CMake 脚本，通常包含以下字段：
 
-内置的 Triplet 虽然覆盖了大部分通用场景，但在 KrKr2 这样复杂的跨平台项目中，我们需要更精细的控制：
+| 字段 | 作用 | 例子 |
+| :--- | :--- | :--- |
+| `VCPKG_TARGET_ARCHITECTURE` | 目标架构 | `x64` / `arm64` / `x86` / `arm` |
+| `VCPKG_CRT_LINKAGE` | C 运行时链接方式 | `static` / `dynamic` |
+| `VCPKG_LIBRARY_LINKAGE` | 依赖库链接方式 | `static` / `dynamic` |
+| `VCPKG_CMAKE_SYSTEM_NAME` | 目标系统名 | `Windows` / `Linux` / `Darwin` / `Android` |
+| `VCPKG_CMAKE_SYSTEM_VERSION` | 目标系统版本 | Android 常设为 API Level，如 `28` |
+| `VCPKG_BUILD_TYPE` | 构建类型裁剪 | `release` 或 `debug` |
+| `VCPKG_MAKE_BUILD_TRIPLET` | 传给 autotools host | `--host=aarch64-linux-android` |
+| `VCPKG_CMAKE_CONFIGURE_OPTIONS` | 额外 CMake 配置参数 | `-DANDROID_ABI=arm64-v8a` |
 
-1.  **Android 平台的特殊需求**：不同的 Android API Level 对应的 NDK 行为不同，我们需要通过 Triplet 锁定 API 版本。
-2.  **强制静态/动态链接**：某些第三方库（如 SDL2）在 Android 下必须是动态链接的，以便被 Java 层加载。
-3.  **自定义编译器标志**：我们需要开启特定的优化选项（如 LTO 或 SSE 指令集）。
-4.  **排除特定架构**：为了减小安装后的体积，我们可以在 Triplet 中只保留 Release 版本。
-
-## KrKr2 的自定义 Triplet 示例
-
-在 KrKr2 项目中，我们维护了一套自定义的 Triplet 方案。
-
-### 1. arm64-android.cmake (标准静态 Android)
+最小可用示例：
 
 ```cmake
-set(VCPKG_TARGET_ARCHITECTURE arm64)
-set(VCPKG_CRT_LINKAGE static)
+set(VCPKG_TARGET_ARCHITECTURE x64)
+set(VCPKG_CRT_LINKAGE dynamic)
 set(VCPKG_LIBRARY_LINKAGE static)
-set(VCPKG_CMAKE_SYSTEM_NAME Android)
-set(VCPKG_CMAKE_SYSTEM_VERSION 28) # 锁定 Android SDK 28 (Pie)
+set(VCPKG_CMAKE_SYSTEM_NAME Linux)
+set(VCPKG_BUILD_TYPE release)
 ```
 
-### 2. android-dynamic-libs.cmake (混合链接方式)
+说明：这表示目标 Linux x64，CRT 动态，库静态，只构建 Release。
 
-有时我们希望大部分库静态链接，但特定的几个库动态链接：
+## 4. 为什么要自定义 Triplet
+
+KrKr2 这类跨平台项目常见需求：
+
+1. Android 固定 API Level，避免不同 NDK 默认值导致的不一致。
+2. 大部分库静态，少数库动态（比如特定运行时加载需求）。
+3. 对端口注入平台参数，如 `ANDROID_ABI`。
+4. 按工程目标裁剪构建类型，减少 CI 时间。
+
+如果完全依赖内置 Triplet，往往会遇到“能编但不满足发布约束”的情况。
+
+## 5. 自定义 Triplet 创建流程
+
+### 步骤 1：确定目标约束
+
+先明确四件事：
+
+- 目标平台
+- 目标架构
+- CRT 链接方式
+- 依赖库链接方式
+
+### 步骤 2：创建 Triplet 文件
+
+建议放在项目目录：
+
+```text
+krkr2/vcpkg/triplets/
+```
+
+新建文件：`x64-linux-release-static.cmake`
 
 ```cmake
-set(VCPKG_TARGET_ARCHITECTURE arm64)
-set(VCPKG_CRT_LINKAGE static)
+set(VCPKG_TARGET_ARCHITECTURE x64)
+set(VCPKG_CRT_LINKAGE dynamic)
 set(VCPKG_LIBRARY_LINKAGE static)
-set(VCPKG_CMAKE_SYSTEM_NAME Android)
-
-# 为 SDL2 强制启用动态库模式
-if(PORT STREQUAL "sdl2")
-    set(VCPKG_LIBRARY_LINKAGE dynamic)
-endif()
+set(VCPKG_CMAKE_SYSTEM_NAME Linux)
+set(VCPKG_BUILD_TYPE release)
 ```
 
-## 如何启用自定义 Triplet (Overlay Triplets)
+### 步骤 3：让 vcpkg 识别该目录
 
-你需要在项目根目录的 `vcpkg-configuration.json` 文件中配置 `overlay-triplets` 字段。
+命令行方式：
+
+```bash
+vcpkg install zlib:x64-linux-release-static --overlay-triplets=./vcpkg/triplets
+```
+
+配置文件方式（`vcpkg-configuration.json`）：
 
 ```json
 {
   "overlay-triplets": [
-    "./vcpkg-triplets"
+    "./vcpkg/triplets"
   ]
 }
 ```
 
-配置完成后，你可以直接在命令行中使用这些 Triplet：
+### 步骤 4：验证构建结果
+
+重点看三点：
+
+1. 日志里 Triplet 名称是否正确。
+2. 库后缀是否符合预期（静态/动态）。
+3. 系统名与架构是否与目标一致。
+
+## 6. overlay-triplets 配置方式
+
+overlay-triplets 的本质是“附加 Triplet 搜索路径”。  
+没有它，vcpkg 通常只会看默认 Triplet 集合。
+
+常见三种接入方式：
+
+### 方式 A：命令行临时注入
 
 ```bash
-vcpkg install zlib:arm64-android --overlay-triplets=./vcpkg-triplets
+vcpkg install fmt:arm64-android --overlay-triplets=./vcpkg/triplets
 ```
 
-如果你是在 Manifest 模式下配合 CMake 使用，可以在 `CMakePresets.json` 中配置：
+适合本地试验，不适合长期团队协作。
+
+### 方式 B：配置文件持久化
 
 ```json
 {
-  "name": "android-arm64",
-  "cacheVariables": {
-    "VCPKG_TARGET_TRIPLET": "arm64-android",
-    "VCPKG_OVERLAY_TRIPLETS": "${sourceDir}/vcpkg-triplets"
-  }
+  "overlay-triplets": [
+    "./vcpkg/triplets"
+  ]
 }
 ```
 
-## 编写自定义 Triplet 的完整步骤
+适合团队与 CI，减少“命令参数遗漏”。
 
-1.  **确定名称**：例如，我们要为一个嵌入式设备创建一个 `x64-linux-embedded`。
-2.  **创建目录**：在项目根目录下创建一个名为 `vcpkg-triplets` 的目录。
-3.  **新建文件**：在目录中新建 `x64-linux-embedded.cmake`。
-4.  **填写内容**：
-    ```cmake
-    set(VCPKG_TARGET_ARCHITECTURE x64)
-    set(VCPKG_CRT_LINKAGE dynamic)
-    set(VCPKG_LIBRARY_LINKAGE static)
-    set(VCPKG_CMAKE_SYSTEM_NAME Linux)
-    # 你还可以添加自定义编译器标志
-    set(VCPKG_CXX_FLAGS "-O3 -march=native")
-    ```
-5.  **配置并使用**：在 `vcpkg-configuration.json` 中添加该路径，然后运行 `vcpkg install`。
+### 方式 C：CMake 变量传递
 
-## 跨平台说明
+```cmake
+set(VCPKG_OVERLAY_TRIPLETS "${CMAKE_SOURCE_DIR}/vcpkg/triplets" CACHE STRING "")
+set(VCPKG_TARGET_TRIPLET "arm64-android" CACHE STRING "")
+```
 
-在不同平台上，Triplet 的变量值有所不同：
+适合多 preset 构建流水线。
 
--   **Windows**: `VCPKG_CRT_LINKAGE` 非常重要。`dynamic` 对应 `/MD`，`static` 对应 `/MT`。如果两者不匹配，编译时会报 `LNK2038` 冲突错误。
--   **Linux**: `VCPKG_CMAKE_SYSTEM_NAME` 必须设为 `Linux`（注意首字母大写）。
--   **macOS**: 如果你希望编译 Universal Binary (包含 x64 和 arm64)，你需要在 Triplet 中设置 `VCPKG_OSX_ARCHITECTURES` 为 `x86_64;arm64`。
--   **Android**: 必须在环境变量或 Triplet 中指定 `ANDROID_NDK_HOME` 的路径，否则 vcpkg 找不到交叉编译器。
+## 7. Android Triplet 特殊配置（结合 KrKr2）
 
-## 练习题与答案
+KrKr2 里真实存在以下 Triplet 文件：
 
-### 题目 1：VCPKG_LIBRARY_LINKAGE 的作用
+- `vcpkg/triplets/arm64-android.cmake`
+- `vcpkg/triplets/arm-android.cmake`
+- `vcpkg/triplets/x64-android.cmake`
+- `vcpkg/triplets/x86-android.cmake`
+- `vcpkg/triplets/android-dynamic-libs.cmake`
 
-如果将 `VCPKG_LIBRARY_LINKAGE` 设置为 `static`，vcpkg 会如何处理那些仅支持动态链接的库？
+还存在一个关键脚本：
 
-<details>
-<summary>查看答案</summary>
+- `cmake/vcpkg_android.cmake`
 
-vcpkg 会优先尝试按照 `VCPKG_LIBRARY_LINKAGE` 指定的方式（静态链接）来编译库。如果库的构建脚本（Portfile）被正确编写，它会遵从这个全局设置。但对于那些从技术上完全不支持静态链接的库，它们可能会忽略这个变量，或者导致编译失败。
+### 7.1 NDK 路径检查
 
-</details>
+`cmake/vcpkg_android.cmake` 明确检查两个环境变量：
 
+- `ANDROID_NDK_HOME`
+- `VCPKG_ROOT`
 
-### 题目 2：Triplet 文件名的限制
+缺失任意一个会直接 `FATAL_ERROR`。  
+这能避免“静默使用错误工具链”导致的隐蔽问题。
 
-你可以将一个自定义的 Triplet 文件命名为 `my-super-triplet.cmake`。此时，你应该如何通过命令行请求安装库？
+### 7.2 ABI 到 Triplet 的映射
 
-<details>
-<summary>查看答案</summary>
+KrKr2 脚本中的映射：
 
-你需要使用文件名（不含扩展名）作为 Triplet 名称。例如，执行 `vcpkg install zlib:my-super-triplet`。同时不要忘了通过 `--overlay-triplets` 指定目录，或者在 `vcpkg-configuration.json` 中预先配置。
+| ANDROID_ABI | VCPKG_TARGET_TRIPLET |
+| :--- | :--- |
+| `arm64-v8a` | `arm64-android` |
+| `armeabi-v7a` | `arm-android` |
+| `x86_64` | `x64-android` |
+| `x86` | `x86-android` |
 
-</details>
+这个映射必须准确，否则常见结果是链接期报错：对象文件架构不匹配。
 
-### 题目 3：混合架构与混合链接
+### 7.3 API Level 配置
 
-在 Android 开发中，Java 调用的 JNI 库通常必须是动态库（`.so`），而 JNI 库依赖的底层 C++ 库我们通常希望静态链接进 `.so`。请问在 Triplet 中应该如何配置？
+KrKr2 Android Triplet 统一设置：
 
-<details>
-<summary>查看答案</summary>
+```cmake
+set(VCPKG_CMAKE_SYSTEM_VERSION 28)
+```
 
-你可以设置全局 `VCPKG_LIBRARY_LINKAGE static`。然后，在你的 JNI 库的 `portfile.cmake` 中手动覆盖或保持默认。或者，在 Triplet 中使用判断语句：
+它决定目标 Android API Level。  
+API Level 改变后，系统符号可用性、端口条件编译分支、兼容区间都可能变化。
+
+### 7.4 ABI 与 host 参数注入
+
+以 `arm64-android.cmake` 为例：
+
+```cmake
+set(VCPKG_MAKE_BUILD_TRIPLET "--host=aarch64-linux-android")
+set(VCPKG_CMAKE_CONFIGURE_OPTIONS -DANDROID_ABI=arm64-v8a)
+include(${CMAKE_CURRENT_LIST_DIR}/android-dynamic-libs.cmake)
+```
+
+这里同时照顾 autotools 与 CMake 两类端口。  
+最后 `include` 的覆盖文件用于处理“局部动态链接”策略。
+
+## 8. 静态链接 vs 动态链接选择策略
+
+### 静态链接适合场景
+
+- 希望部署文件尽量少。
+- 希望减少运行时依赖查找问题。
+- 希望版本完全内聚在可执行文件中。
+
+### 动态链接适合场景
+
+- 需要运行时替换或单独升级某个库。
+- 某些平台或框架要求动态库加载。
+- 希望减小主二进制大小。
+
+### KrKr2 的策略
+
+KrKr2 Android Triplet 默认：
+
 ```cmake
 set(VCPKG_LIBRARY_LINKAGE static)
-if(PORT STREQUAL "my-jni-lib")
-    set(VCPKG_LIBRARY_LINKAGE dynamic)
-endif()
 ```
-这样除了 `my-jni-lib` 之外的所有库都会被静态编译，最后链接进 `my-jni-lib.so` 中。
+
+并通过 `android-dynamic-libs.cmake` 局部覆盖：
+
+```cmake
+set(DYNAMIC_LIBRARIES sdl2)
+if(PORT IN_LIST DYNAMIC_LIBRARIES)
+    set(VCPKG_LIBRARY_LINKAGE dynamic)
+endif ()
+```
+
+这相当于“全局静态 + 局部动态”，兼顾部署稳定性与个别端口需求。
+
+## 9. KrKr2 项目的 Triplet 使用分析
+
+从工程分层看：
+
+1. `cmake/vcpkg_android.cmake` 负责入口条件和工具链拼接。
+2. `vcpkg/triplets/*.cmake` 负责具体依赖构建策略。
+3. `android-dynamic-libs.cmake` 负责端口级覆盖规则。
+
+这种结构的优势：
+
+- 规则集中，便于团队审查。
+- Android ABI 变化时改动点明确。
+- 可以快速把“临时修复”沉淀成稳定模板。
+
+## 10. 动手实践
+
+目标：创建一个 Android API 29 的自定义 Triplet，并验证生效。
+
+### 实践步骤
+
+1. 在 `krkr2/vcpkg/triplets/` 下新建 `arm64-android-api29.cmake`。  
+2. 写入以下内容：
+
+```cmake
+set(VCPKG_TARGET_ARCHITECTURE arm64)
+set(VCPKG_CRT_LINKAGE static)
+set(VCPKG_LIBRARY_LINKAGE static)
+set(VCPKG_CMAKE_SYSTEM_NAME Android)
+set(VCPKG_CMAKE_SYSTEM_VERSION 29)
+set(VCPKG_MAKE_BUILD_TRIPLET "--host=aarch64-linux-android")
+set(VCPKG_CMAKE_CONFIGURE_OPTIONS -DANDROID_ABI=arm64-v8a)
+include(${CMAKE_CURRENT_LIST_DIR}/android-dynamic-libs.cmake)
+```
+
+3. 执行安装命令：
+
+```bash
+vcpkg install zlib:arm64-android-api29 --overlay-triplets=./vcpkg/triplets
+```
+
+4. 在日志确认以下关键项：
+
+- `VCPKG_TARGET_TRIPLET=arm64-android-api29`
+- `ANDROID_ABI=arm64-v8a`
+- `CMAKE_SYSTEM_VERSION=29`
+
+## 11. 本节小结
+
+- Triplet 是 vcpkg 的核心控制面，不只是名称标签。
+- 自定义 Triplet 的关键是：写好 `.cmake` + 正确接入 overlay-triplets。
+- Android 场景必须重视 NDK、ABI、API Level、工具链链式加载。
+- KrKr2 采用“全局静态 + 局部动态”策略，是兼顾可部署性与运行时需求的典型方案。
+- 构建异常时，优先核查 Triplet 名称、路径、ABI 映射、CRT 一致性。
+
+## 12. 练习题与答案
+
+### 题目 1：Triplet 调用
+
+你新增了 `vcpkg/triplets/x64-linux-fastdebug.cmake`，请写出安装 `fmt` 的命令，要求显式使用 overlay-triplets。
+
+<details>
+<summary>查看答案</summary>
+
+```bash
+vcpkg install fmt:x64-linux-fastdebug --overlay-triplets=./vcpkg/triplets
+```
 
 </details>
+
+### 题目 2：Android 映射
+
+在 KrKr2 的 Android 辅助脚本里，如果 `ANDROID_ABI=x86_64`，应映射到哪个 Triplet？
+
+<details>
+<summary>查看答案</summary>
+
+应映射到 `x64-android`。  
+因为脚本使用 ABI 到 Triplet 的固定映射，`x86_64` 对应 vcpkg 的 x64 Android 目标。
+
+</details>
+
+### 题目 3：链接策略
+
+如果你希望“默认全部静态，只有 `sdl2` 动态”，Triplet 侧应如何写？
+
+<details>
+<summary>查看答案</summary>
+
+```cmake
+set(VCPKG_LIBRARY_LINKAGE static)
+set(DYNAMIC_LIBRARIES sdl2)
+if(PORT IN_LIST DYNAMIC_LIBRARIES)
+    set(VCPKG_LIBRARY_LINKAGE dynamic)
+endif ()
+```
+
+</details>
+
+## 13. 下一步
+
+请继续阅读：[03-二进制缓存.md](./03-二进制缓存.md)
+
+下一节会解决三个问题：
+
+1. 如何开启 vcpkg 二进制缓存。  
+2. 如何在 CI 里复用缓存降低构建时间。  
+3. 如何将 Triplet 与缓存策略组合，得到稳定可复现的跨平台构建流程。

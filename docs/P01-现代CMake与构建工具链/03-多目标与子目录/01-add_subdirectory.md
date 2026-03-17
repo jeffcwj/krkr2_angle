@@ -1,18 +1,189 @@
-## CMAKE_CURRENT_SOURCE_DIR vs CMAKE_SOURCE_DIR
-在多目录项目中，CMake 提供了几个重要的路径变量，理解它们的区别至关重要：
-- **CMAKE_SOURCE_DIR**：项目根目录（包含最顶层 `CMakeLists.txt` 的目录）。无论你在哪个子目录，这个变量的值永远不变。
-- **CMAKE_CURRENT_SOURCE_DIR**：当前正在处理的 `CMakeLists.txt` 所在的目录。
-- **CMAKE_BINARY_DIR**：编译输出的根目录（通常是 `build/`）。
-- **CMAKE_CURRENT_BINARY_DIR**：当前子目录对应的编译输出目录。
+# add_subdirectory：把目录层级映射为构建层级
 
-**建议：** 在子目录中引用文件时，优先使用 `CMAKE_CURRENT_SOURCE_DIR`，这样可以保证模块的移动不会破坏路径。
+> **所属模块：** P01-现代CMake与构建工具链
+> **前置知识：** [02-多目标工程的基本组织.md](./02-多目标工程的基本组织.md)
+> **预计阅读时间：** 28 分钟
 
-## 完整示例
-让我们亲手创建一个包含两个子目录的项目：一个生成静态库 `math_utils`，另一个生成可执行文件 `main_app`。
+## 本节目标
 
-### 目录结构
+读完本节后，你将能够：
+1. 写出 `add_subdirectory(source_dir [binary_dir] [EXCLUDE_FROM_ALL])` 完整语法并解释参数语义。
+2. 理解子目录变量作用域，正确使用 `PARENT_SCOPE`。
+3. 理清子目录间目标可见性、定义顺序与传播规则。
+4. 理解 `include()` 与 `add_subdirectory()` 的边界。
+5. 了解 `FetchContent` 在外部项目引入中的位置。
+6. 结合 KrKr2 根构建脚本理解真实组织策略。
+
+## add_subdirectory 完整语法与参数
+
+```cmake
+add_subdirectory(source_dir [binary_dir] [EXCLUDE_FROM_ALL])
+```
+
+### 参数 source_dir
+
+- 指向子目录源码路径。
+- 该目录内必须有 `CMakeLists.txt`。
+
+```cmake
+cmake_minimum_required(VERSION 3.20)
+project(SourceDirDemo)
+
+add_subdirectory(src)
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/tools)
+```
+
+### 参数 binary_dir
+
+- 指定子目录构建输出目录。
+
+```cmake
+cmake_minimum_required(VERSION 3.20)
+project(BinaryDirDemo)
+
+add_subdirectory(lib "${CMAKE_BINARY_DIR}/variants/lib_debug_like")
+```
+
+### 参数 EXCLUDE_FROM_ALL
+
+- 子目录目标默认不进入 `all`。
+
+```cmake
+cmake_minimum_required(VERSION 3.20)
+project(ExcludeFromAllDemo)
+
+add_subdirectory(core)
+add_subdirectory(samples EXCLUDE_FROM_ALL)
+
+add_executable(app main.cpp)
+target_link_libraries(app PRIVATE core_lib)
+```
+
+## 路径变量：CMAKE_SOURCE_DIR 与 CMAKE_CURRENT_SOURCE_DIR
+
+- `CMAKE_SOURCE_DIR`：顶层源码目录。
+- `CMAKE_CURRENT_SOURCE_DIR`：当前处理目录。
+- `CMAKE_BINARY_DIR`：顶层构建目录。
+- `CMAKE_CURRENT_BINARY_DIR`：当前目录构建目录。
+
+## 变量作用域：子目录如何回写父目录
+
+默认行为：
+1. 父目录变量对子目录可见。
+2. 子目录普通 `set()` 不会改动父目录。
+3. 回写父目录要用 `PARENT_SCOPE`。
+
+```cmake
+# root/CMakeLists.txt
+cmake_minimum_required(VERSION 3.20)
+project(ScopeDemo)
+
+set(ENABLE_LOG ON)
+add_subdirectory(module)
+message(STATUS "ENABLE_LOG=${ENABLE_LOG}")
+```
+
+```cmake
+# module/CMakeLists.txt
+set(ENABLE_LOG OFF)
+set(ENABLE_LOG OFF PARENT_SCOPE)
+```
+
+## 子目录间目标可见性规则
+
+### 规则 1：target 名称全局唯一
+
+同一配置图里 target 不可重名。
+
+### 规则 2：先定义后使用
+
+```cmake
+# 根目录
+add_subdirectory(math)
+add_subdirectory(app)
+```
+
+```cmake
+# app/CMakeLists.txt
+add_executable(calc_app main.cpp)
+target_link_libraries(calc_app PRIVATE math_lib)
+```
+
+### 规则 3：PUBLIC / PRIVATE / INTERFACE 控制传播
+
+- `PRIVATE`：仅当前目标。
+- `PUBLIC`：当前目标与下游。
+- `INTERFACE`：仅下游。
+
+## include() vs add_subdirectory() 对比
+
+| 维度 | include() | add_subdirectory() |
+|---|---|---|
+| 本质 | 复用脚本逻辑 | 引入子构建单元 |
+| 作用域 | 当前作用域 | 新建目录作用域 |
+| 是否要求子目录有 CMakeLists | 否 | 是 |
+
+## 深层嵌套项目结构组织策略
+
+推荐“顶层聚合 + 模块自治”。
+
 ```text
-my_project/
+engine/
+├── CMakeLists.txt
+├── cmake/
+│   ├── Warnings.cmake
+│   └── Sanitizers.cmake
+├── modules/
+│   ├── runtime/
+│   │   └── CMakeLists.txt
+│   ├── script/
+│   │   └── CMakeLists.txt
+│   └── render/
+│       └── CMakeLists.txt
+└── apps/
+    └── player/
+        └── CMakeLists.txt
+```
+
+顶层脚本建议只保留 `include(...)` 与 `add_subdirectory(...)` 聚合逻辑。
+
+## FetchContent 模块简介
+
+`FetchContent` 在配置阶段拉取外部源码，再并入当前构建图。
+
+```cmake
+cmake_minimum_required(VERSION 3.20)
+project(FetchDemo)
+
+include(FetchContent)
+
+FetchContent_Declare(
+    fmt
+    GIT_REPOSITORY https://github.com/fmtlib/fmt.git
+    GIT_TAG 10.2.1
+)
+
+FetchContent_MakeAvailable(fmt)
+
+add_executable(fetch_app main.cpp)
+target_link_libraries(fetch_app PRIVATE fmt::fmt)
+```
+
+```cpp
+#include <fmt/core.h>
+
+int main() {
+    fmt::print("FetchContent 成功：{}\n", 42);
+    return 0;
+}
+```
+
+## 多层级项目实例（由浅入深）
+
+### 阶段 A：最小双目录
+
+```text
+demo/
 ├── CMakeLists.txt
 ├── math/
 │   ├── CMakeLists.txt
@@ -23,41 +194,35 @@ my_project/
     └── main.cpp
 ```
 
-### 1. 根目录 `CMakeLists.txt`
 ```cmake
-cmake_minimum_required(VERSION 3.10)
-project(MultiDirExample)
+# demo/CMakeLists.txt
+cmake_minimum_required(VERSION 3.20)
+project(MultiDirDemo)
 
-# 添加子目录
 add_subdirectory(math)
 add_subdirectory(app)
 ```
 
-### 2. `math/adder.h`
-```cpp
-#pragma once
-int add(int a, int b);
-```
-
-### 3. `math/adder.cpp`
-```cpp
-#include "adder.h"
-int add(int a, int b) {
-    return a + b;
-}
-```
-
-### 4. `math/CMakeLists.txt`
 ```cmake
-# 创建一个名为 math_lib 的静态库
+# demo/math/CMakeLists.txt
 add_library(math_lib STATIC adder.cpp)
-
-# 指定头文件路径，方便别人使用
 target_include_directories(math_lib PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 ```
 
-### 5. `app/main.cpp`
 ```cpp
+// demo/math/adder.cpp
+#include "adder.h"
+int add(int a, int b) { return a + b; }
+```
+
+```cmake
+# demo/app/CMakeLists.txt
+add_executable(main_app main.cpp)
+target_link_libraries(main_app PRIVATE math_lib)
+```
+
+```cpp
+// demo/app/main.cpp
 #include <iostream>
 #include "adder.h"
 
@@ -67,66 +232,138 @@ int main() {
 }
 ```
 
-### 6. `app/CMakeLists.txt`
-```cmake
-add_executable(main_app main.cpp)
-
-# 链接 math_lib 库
-target_link_libraries(main_app PRIVATE math_lib)
-```
-
-### 构建与运行
-在根目录下运行：
-```bash
-mkdir build
-cd build
-cmake ..
-cmake --build .
-# Windows: .\app\Debug\main_app.exe
-# Linux/macOS: ./app/main_app
-```
-
-## 对照 KrKr2
-在 KrKr2 的源代码中，根目录的 `CMakeLists.txt` 正是通过这种方式组织庞大的代码库的。你可以看到类似下面的结构：
+### 阶段 B：samples 默认不构建
 
 ```cmake
-# 引入外部依赖库
+add_subdirectory(samples EXCLUDE_FROM_ALL)
+```
+
+## KrKr2 项目子目录组织分析
+
+读取 `krkr2/CMakeLists.txt` 可见：
+
+```cmake
+set(KRKR2CORE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cpp/core)
+set(KRKR2PLUGIN_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cpp/plugins)
+
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/cpp/external)
-
-# 引入核心引擎模块 (cpp/core/)
-# KRKR2CORE_PATH 变量通常在根目录定义
 add_subdirectory(${KRKR2CORE_PATH})
-
-# 引入插件模块 (cpp/plugins/)
 add_subdirectory(${KRKR2PLUGIN_PATH})
 ```
 
-这种结构允许核心开发者专注于 `cpp/core/` 下的代码，而插件开发者只需要关注 `cpp/plugins/`，互不干扰，逻辑清晰。
+并且测试与工具按选项启用：
+
+```cmake
+if(ENABLE_TESTS AND NOT (IOS OR ANDROID))
+    enable_testing()
+    add_subdirectory(tests)
+endif()
+
+if(BUILD_TOOLS AND NOT (IOS OR ANDROID))
+    add_subdirectory(tools)
+endif()
+```
+
+## 动手实践
+
+目标：创建 `app + calc_lib + text_lib + samples`，验证 `EXCLUDE_FROM_ALL` 与 `PARENT_SCOPE`。
+
+```cmake
+# practice/CMakeLists.txt
+cmake_minimum_required(VERSION 3.20)
+project(AddSubdirectoryPractice)
+
+set(PROJECT_FLAVOR "dev")
+
+add_subdirectory(libs/calc)
+add_subdirectory(libs/text)
+add_subdirectory(app)
+add_subdirectory(samples EXCLUDE_FROM_ALL)
+
+message(STATUS "[root] PROJECT_FLAVOR=${PROJECT_FLAVOR}")
+```
+
+在 `libs/text/CMakeLists.txt` 中加入 `set(PROJECT_FLAVOR "dev-with-text" PARENT_SCOPE)`，并观察父目录输出变化。
 
 ## 本节小结
-1. `add_subdirectory()` 让项目结构化，易于维护。
-2. 每个子目录必须有自己的 `CMakeLists.txt`。
-3. 子目录继承父目录变量，但修改需用 `PARENT_SCOPE` 影响父目录。
-4. 始终清楚 `CMAKE_CURRENT_SOURCE_DIR` 指向何处。
+
+- `add_subdirectory` 是多目录 CMake 工程的主干命令。
+- 三个参数分别控制源码目录、输出目录、默认构建集合。
+- 子目录作用域默认隔离，回写父目录要用 `PARENT_SCOPE`。
+- 目标可见性依赖定义顺序与 PUBLIC/PRIVATE/INTERFACE。
+- `include()` 用于脚本复用，`add_subdirectory()` 用于模块复用。
 
 ## 练习题与答案
-### 题目 1：路径辨析
-如果在 `/home/user/project/src/utils/CMakeLists.txt` 中使用了 `add_subdirectory`，此时 `CMAKE_SOURCE_DIR` 和 `CMAKE_CURRENT_SOURCE_DIR` 分别指向哪里？
-<details><summary>查看答案</summary>
-`CMAKE_SOURCE_DIR` 指向项目根目录 `/home/user/project/`。
-`CMAKE_CURRENT_SOURCE_DIR` 指向当前目录 `/home/user/project/src/utils/`。
+
+### 题目 1：语法题
+
+写出 `add_subdirectory` 完整语法，并解释 `EXCLUDE_FROM_ALL` 的行为。
+
+<details>
+<summary>查看答案</summary>
+
+```cmake
+add_subdirectory(source_dir [binary_dir] [EXCLUDE_FROM_ALL])
+```
+
+`EXCLUDE_FROM_ALL` 使该子目录目标默认不参与 `all`，但若被其他目标显式依赖，仍会被构建。
+
 </details>
 
-### 题目 2：变量修改
-父目录定义了 `set(ENABLE_LOG ON)`。子目录执行了 `set(ENABLE_LOG OFF)`。
-1. 子目录后续代码中 `ENABLE_LOG` 的值是多少？
-2. 父目录在 `add_subdirectory` 之后的代码中 `ENABLE_LOG` 的值是多少？
-3. 如何让子目录的修改影响到父目录？
-<details><summary>查看答案</summary>
-1. `OFF`。
-2. `ON`（子目录的普通 set 不影响父目录作用域）。
-3. 使用 `set(ENABLE_LOG OFF PARENT_SCOPE)`。
+### 题目 2：作用域题
+
+父目录：
+
+```cmake
+set(USE_SIMD ON)
+add_subdirectory(engine)
+message(STATUS "USE_SIMD=${USE_SIMD}")
+```
+
+子目录：
+
+```cmake
+set(USE_SIMD OFF)
+```
+
+问：父目录输出什么？如何改为输出 `OFF`？
+
+<details>
+<summary>查看答案</summary>
+
+父目录输出 `ON`，因为子目录普通 `set()` 不回写父目录。
+
+改为 `OFF`：
+
+```cmake
+set(USE_SIMD OFF PARENT_SCOPE)
+```
+
+</details>
+
+### 题目 3：命令选型题
+
+需求 A：复用 `cmake/Warnings.cmake`。  
+需求 B：引入带独立 `CMakeLists.txt` 的 `network/` 模块。  
+分别使用什么命令？
+
+<details>
+<summary>查看答案</summary>
+
+需求 A：
+
+```cmake
+include(cmake/Warnings.cmake)
+```
+
+需求 B：
+
+```cmake
+add_subdirectory(network)
+```
+
 </details>
 
 ## 下一步
-→ 继续阅读 [02-INTERFACE与PUBLIC与PRIVATE.md](./02-INTERFACE与PUBLIC与PRIVATE.md)
+
+继续阅读 [02-INTERFACE与PUBLIC与PRIVATE.md](./02-INTERFACE与PUBLIC与PRIVATE.md)。

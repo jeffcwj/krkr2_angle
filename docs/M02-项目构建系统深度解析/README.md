@@ -17,13 +17,13 @@
 
 ## 章节目录
 
-| 序号 | 文件 | 标题 | 核心内容 |
+| 序号 | 标题 | 小节 | 核心内容 |
 |------|------|------|----------|
-| 01 | [01-根CMakeLists深度解读.md](./01-根CMakeLists深度解读.md) | 根 CMakeLists.txt 深度解读 | 逐段分析 143 行根构建文件：选项定义、平台检测、目标注册、链接依赖、资源拷贝 |
-| 02 | [02-INTERFACE库与模块链接.md](./02-INTERFACE库与模块链接.md) | INTERFACE 库与模块链接 | `krkr2core` 的 INTERFACE 传播机制、9 个子模块的链接关系、插件 STATIC 库设计 |
-| 03 | [03-平台条件编译实现.md](./03-平台条件编译实现.md) | 平台条件编译实现 | 自定义平台变量、CMakePresets.json 预设体系、平台源文件选择策略 |
-| 04 | [04-Android-Gradle与CMake协作.md](./04-Android-Gradle与CMake协作.md) | Android Gradle 与 CMake 协作 | Gradle 项目结构、`build.gradle` CMake 配置、NDK ABI 过滤、JNI 加载 |
-| 05 | [05-自定义CMake模块.md](./05-自定义CMake模块.md) | 自定义 CMake 模块 | `CocosBuildHelpers.cmake` 资源管理、`vcpkg_android.cmake` 双 toolchain 叠加 |
+| 01 | [根 CMakeLists.txt 深度解读](./01-根CMakeLists深度解读/) | 01-CMake版本与全局设置 / 02-vcpkg集成与平台入口 / 03-子目录链接与资源拷贝 | 逐段分析 143 行根构建文件：选项定义、平台检测、目标注册、链接依赖、资源拷贝 |
+| 02 | [INTERFACE 库与模块链接](./02-INTERFACE库与模块链接/) | 01-INTERFACE库本质与krkr2core / 02-krkr2plugin与依赖传播 / 03-动手实践与总结 | `krkr2core` 的 INTERFACE 传播机制、9 个子模块的链接关系、插件 STATIC 库设计 |
+| 03 | [平台条件编译实现](./03-平台条件编译实现/) | 01-CMakePresets与平台Preset / 02-条件编译与vcpkg平台条件 / 03-源代码中的条件编译与实践 | 自定义平台变量、CMakePresets.json 预设体系、平台源文件选择策略 |
+| 04 | [Android Gradle 与 CMake 协作](./04-Android-Gradle与CMake协作/) | 01-双层架构与Gradle配置 / 02-JNI桥接层与常见错误 / 03-动手实践与总结 | Gradle 项目结构、`build.gradle` CMake 配置、NDK ABI 过滤、JNI 加载 |
+| 05 | [自定义 CMake 模块](./05-自定义CMake模块/) | 01-CMake辅助模块与封装方式 / 02-CocosBuildHelpers详解 / 03-vcpkg-android与sync-folder / 04-对照源码与总结 | `CocosBuildHelpers.cmake` 资源管理、`vcpkg_android.cmake` 双 toolchain 叠加 |
 
 ## 涉及的源码文件
 
@@ -53,3 +53,13 @@ krkr2/
 2. **按顺序阅读**：章节之间有递进关系，第 01 章是后续章节的基础
 3. **动手修改**：每章的"动手实践"环节建议实际操作，加深理解
 4. **跨模块参考**：本模块会频繁引用 P01（CMake 基础）和 P02（vcpkg 基础）的概念，如遇不理解的术语请回查
+
+## 编写状态
+
+| 章 | 小节文件 | 状态 |
+|----|----------|------|
+| 01 | 01-CMake版本与全局设置.md / 02-vcpkg集成与平台入口.md / 03-子目录链接与资源拷贝.md | ✅ 已完成 |
+| 02 | 01-INTERFACE库本质与krkr2core.md / 02-krkr2plugin与依赖传播.md / 03-动手实践与总结.md | ✅ 已完成 |
+| 03 | 01-CMakePresets与平台Preset.md / 02-条件编译与vcpkg平台条件.md / 03-源代码中的条件编译与实践.md | ✅ 已完成 |
+| 04 | 01-双层架构与Gradle配置.md / 02-JNI桥接层与常见错误.md / 03-动手实践与总结.md | ✅ 已完成 |
+| 05 | 01-CMake辅助模块与封装方式.md / 02-CocosBuildHelpers详解.md / 03-vcpkg-android与sync-folder.md / 04-对照源码与总结.md | ✅ 已完成 |

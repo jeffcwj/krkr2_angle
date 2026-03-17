@@ -20,13 +20,13 @@
 
 ## 章节目录
 
-| 章节 | 文件 | 内容概要 |
-|------|------|----------|
-| 第 1 章 | [01-environ模块总览与架构.md](./01-environ模块总览与架构.md) | 模块职责、目录结构、CMake 构建配置、架构全景图 |
-| 第 2 章 | [02-Platform接口与平台实现对比.md](./02-Platform接口与平台实现对比.md) | Platform.h 接口设计、Win32/Linux/Android 三平台实现逐行对比 |
-| 第 3 章 | [03-Application生命周期与消息系统.md](./03-Application生命周期与消息系统.md) | tTVPApplication 类、启动流程、消息循环、内存管理、事件分发 |
-| 第 4 章 | [04-Cocos2d-x桥接层.md](./04-Cocos2d-x桥接层.md) | AppDelegate、MainScene、CustomFileUtils、Director 集成 |
-| 第 5 章 | [05-配置管理系统.md](./05-配置管理系统.md) | iSysConfigManager 基类、Global/Individual/Locale 三级配置、模板特化 |
+| 章节 | 标题 | 小节 | 内容概要 |
+|------|------|------|----------|
+| 01 | [environ 模块总览与架构](./01-environ模块总览与架构/) | 01-模块定位与目录结构 / 02-CMakeLists与模块依赖 / 03-设计哲学与实践 | 模块职责、目录结构、CMake 构建配置、架构全景图 |
+| 02 | [Platform 接口与平台实现对比](./02-Platform接口与平台实现对比/) | 01-Platform契约与内存查询 / 02-消息框输入框与文件操作 / 03-路径发现与系统工具函数 / 04-实战macOS实现与总结 | Platform.h 接口设计、Win32/Linux/Android 三平台实现逐行对比 |
+| 03 | [Application 生命周期与消息系统](./03-Application生命周期与消息系统/) | 01-tTVPApplication总览与启动流程 / 02-主循环与消息队列 / 03-活动状态与退出机制 / 04-动手实践与总结 | tTVPApplication 类、启动流程、消息循环、内存管理、事件分发 |
+| 04 | [Cocos2d-x 桥接层](./04-Cocos2d-x桥接层/) | 01-桥接层概览与AppDelegate / 02-TVPMainScene双层场景 / 03-TVPWindowLayer与UI表单栈 / 04-输入系统与虚拟光标 / 05-常见错误与实践总结 | AppDelegate、MainScene、CustomFileUtils、Director 集成 |
+| 05 | [配置管理系统](./05-配置管理系统/) | 01-配置管理系统详解 / 02-动手实践与总结 | iSysConfigManager 基类、Global/Individual/Locale 三级配置、模板特化 |
 
 ---
 
@@ -61,3 +61,13 @@ krkr2/cpp/core/environ/
 2. 第 2 章和第 3 章是核心，建议边读源码边看教程
 3. 第 4 章需要 Cocos2d-x 基础知识（P10 模块，但本章会提供足够的上下文）
 4. 第 5 章相对独立，可根据需要选读
+
+## 编写状态
+
+| 章 | 小节文件 | 状态 |
+|----|----------|------|
+| 01 | 01-模块定位与目录结构.md / 02-CMakeLists与模块依赖.md / 03-设计哲学与实践.md | ✅ 已完成 |
+| 02 | 01-Platform契约与内存查询.md / 02-消息框输入框与文件操作.md / 03-路径发现与系统工具函数.md / 04-实战macOS实现与总结.md | ✅ 已完成 |
+| 03 | 01-tTVPApplication总览与启动流程.md / 02-主循环与消息队列.md / 03-活动状态与退出机制.md / 04-动手实践与总结.md | ✅ 已完成 |
+| 04 | 01-桥接层概览与AppDelegate.md / 02-TVPMainScene双层场景.md / 03-TVPWindowLayer与UI表单栈.md / 04-输入系统与虚拟光标.md / 05-常见错误与实践总结.md | ✅ 已完成 |
+| 05 | 01-配置管理系统详解.md / 02-动手实践与总结.md | ✅ 已完成 |

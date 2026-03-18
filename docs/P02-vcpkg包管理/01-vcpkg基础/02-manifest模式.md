@@ -330,6 +330,57 @@ cmake -B build -S . -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcp
 cmake --build build
 ```
 
+## 常见错误及解决方案
+
+### 错误 1：`vcpkg.json` 放错位置导致依赖不生效
+
+**现象：** CMake configure 不触发自动安装，`find_package` 报找不到包。
+
+**原因：** `vcpkg.json` 必须与 `CMakeLists.txt` 处于同一目录（项目根目录）。如果放在子目录或路径拼写有误，vcpkg toolchain 不会识别。
+
+**解决：**
+
+```bash
+# 确认两者在同一目录
+ls CMakeLists.txt vcpkg.json
+# 如果 vcpkg.json 不在此目录，移动它
+mv subdir/vcpkg.json .
+```
+
+### 错误 2：`builtin-baseline` 与 `vcpkg-configuration.json` 中的 baseline 冲突
+
+**现象：** 配置期间出现 `error: a]default-registry]is specified in vcpkg-configuration.json and a builtin-baseline is in vcpkg.json` 类似报错。
+
+**原因：** vcpkg 不允许在 `vcpkg.json` 中设置 `builtin-baseline` 的同时在 `vcpkg-configuration.json` 中配置 `default-registry`。两者功能重叠，只能保留一个。
+
+**解决：** 推荐删除 `vcpkg.json` 中的 `builtin-baseline`，统一由 `vcpkg-configuration.json` 管理：
+
+```json
+// vcpkg-configuration.json（保留 baseline）
+{
+  "default-registry": {
+    "kind": "builtin",
+    "baseline": "b1e15efef6758eaa0beb0a8732cfa66f6a68a81d"
+  }
+}
+```
+
+### 错误 3：`overrides` 写了但不生效
+
+**现象：** 安装的包版本不是 `overrides` 指定的版本。
+
+**原因：** `overrides` 仅在有 baseline 时才有意义。如果没有配置 baseline（无论在 `vcpkg.json` 还是 `vcpkg-configuration.json` 中），vcpkg 会忽略 overrides。
+
+**解决：** 确保项目配置了 baseline，然后重新运行 configure：
+
+```bash
+# 清理并重新配置
+rm -rf out/build
+cmake -B out/build -S . -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake"
+# 确认版本
+vcpkg list | grep opencv
+```
+
 ## 本节小结
 - Manifest 模式优于 Classic，适合团队和 CI。
 - `vcpkg.json` 管依赖声明，`vcpkg-configuration.json` 管来源策略。

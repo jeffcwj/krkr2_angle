@@ -288,6 +288,66 @@ cmake --build out/android/arm64-v8a/debug --target krkr2
 - `krkr2/cmake/vcpkg_android.cmake` 第 20-99 行：Android 叠加逻辑。
 - `krkr2/docs/P02-vcpkg包管理/03-vcpkg与CMake集成/01-toolchain文件.md`：本节教程。
 
+## 常见错误及解决方案
+
+### 错误 1：在 `project()` 之后设置 `CMAKE_TOOLCHAIN_FILE`
+
+**现象：** CMake 不报错但 toolchain 不生效，`find_package` 找不到 vcpkg 安装的包。
+
+**原因：** `CMAKE_TOOLCHAIN_FILE` 必须在 `project()` 调用之前生效。CMake 在处理 `project()` 时就完成了编译器检测和平台初始化，之后再设置 toolchain 为时已晚。
+
+**解决：** 使用命令行 `-D` 参数、Preset 或在 `project()` 之前用 `set(... CACHE ...)` 设置：
+
+```cmake
+# ✅ 正确：project() 之前
+set(CMAKE_TOOLCHAIN_FILE "$ENV{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake"
+    CACHE FILEPATH "vcpkg toolchain")
+project(my_project LANGUAGES CXX)
+
+# ❌ 错误：project() 之后
+project(my_project LANGUAGES CXX)
+set(CMAKE_TOOLCHAIN_FILE "...")  # 太晚了，不会生效
+```
+
+### 错误 2：Android 构建时 `VCPKG_CHAINLOAD_TOOLCHAIN_FILE` 路径错误
+
+**现象：** 配置时报 `CMake Error: CMAKE_C_COMPILER not set` 或找不到 NDK toolchain 文件。
+
+**原因：** `VCPKG_CHAINLOAD_TOOLCHAIN_FILE` 指向的 NDK toolchain 路径不存在。常见原因包括 `ANDROID_NDK_HOME` 环境变量未设置、NDK 版本更新后路径变化。
+
+**解决：**
+
+```bash
+# 确认 NDK 路径存在
+ls "$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake"
+# 如果路径不存在，检查环境变量
+echo $ANDROID_NDK_HOME
+# 修正后重新配置
+cmake -S . -B out/android/arm64-v8a/debug \
+  -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" \
+  -DVCPKG_CHAINLOAD_TOOLCHAIN_FILE="$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake" \
+  -DANDROID_ABI=arm64-v8a \
+  -DVCPKG_TARGET_TRIPLET=arm64-android
+```
+
+### 错误 3：triplet 与实际目标平台不匹配
+
+**现象：** 构建成功但链接时出现 `incompatible target` 或运行时崩溃。
+
+**原因：** `VCPKG_TARGET_TRIPLET` 指定的架构与实际编译目标不一致。例如在 arm64 设备上使用了 `x64-android` triplet，或在 Debug 构建中使用了 static-release triplet。
+
+**解决：** 确保 triplet 与目标平台完全匹配：
+
+```bash
+# 检查当前配置的 triplet
+grep VCPKG_TARGET_TRIPLET out/build/CMakeCache.txt
+# Android 常用映射
+# arm64-v8a   → arm64-android
+# armeabi-v7a → arm-android
+# x86_64      → x64-android
+# x86         → x86-android
+```
+
 ## 本节小结
 
 - `CMAKE_TOOLCHAIN_FILE` 是配置入口级变量。

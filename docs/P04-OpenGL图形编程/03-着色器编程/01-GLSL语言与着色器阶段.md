@@ -21,7 +21,7 @@
 GLSL（OpenGL Shading Language）是运行在 GPU 上的语言。它的目标不是通用编程，而是高吞吐并行计算。
 
 - 你写一份顶点着色器代码，GPU 会对每个顶点并行执行。
-- 你写一份片段着色器代码，GPU 会对每个片段并行执行。
+- 你写一份片段着色器代码，GPU 会对每个片段（fragment，即光栅化后的像素候选者——一个顶点组成的三角形覆盖屏幕上的每个像素位置都会产生一个片段，片段着色器决定该位置的最终颜色）并行执行。
 - 因为执行模型不同，GLSL 提供了向量、矩阵、采样器等图形专用类型。
 
 ### 1.2 必会数据类型
@@ -76,7 +76,7 @@ varying vec2 vTexCoord;     // 传给片段着色器
 uniform mat4 uMVP;          // 模型-视图-投影矩阵
 
 void main() {
-    gl_Position = uMVP * vec4(aPos, 1.0); // 计算裁剪空间坐标
+    gl_Position = uMVP * vec4(aPos, 1.0); // 计算裁剪空间坐标（clip space，经 MVP 变换后的坐标，GPU 据此裁剪不可见部分）
     vTexCoord = aTexCoord;                // 透传 UV
 }
 ```
@@ -107,7 +107,7 @@ out vec2 vTexCoord;                     // 传递到片段阶段
 uniform mat4 uMVP;                      // 变换矩阵
 
 void main() {
-    gl_Position = uMVP * vec4(aPos, 1.0); // 计算裁剪坐标
+    gl_Position = uMVP * vec4(aPos, 1.0); // 计算裁剪空间坐标
     vTexCoord = aTexCoord;                // 传递 UV
 }
 ```
@@ -131,7 +131,7 @@ Desktop 版只需把版本改为 `#version 330 core`，并移除 `precision` 语
 
 ### 2.1 gl_Position 与 gl_PointSize
 
-- `gl_Position`：顶点着色器必须写入，表示裁剪空间坐标。
+- `gl_Position`：顶点着色器必须写入，表示裁剪空间坐标（clip space coordinate，即经过模型/视图/投影变换后的四维齐次坐标，GPU 会根据该值判断顶点是否在可视范围内）。
 - `gl_PointSize`：当你绘制 `GL_POINTS` 时有效，控制点精灵大小。
 
 如果忘记写 `gl_Position`，程序一般会链接失败或渲染异常。
@@ -168,7 +168,7 @@ void main() {
 
 1. 传入 C++ 端矩阵时要确认列主序与库约定一致。
 2. `Projection` 错误会导致图形“看不见”或拉伸。
-3. 2D 正交投影常用范围：左上原点映射到 NDC。
+3. 2D 正交投影常用范围：左上原点映射到 NDC（Normalized Device Coordinates，标准化设备坐标，即裁剪空间经过透视除法后各轴归一化到 [-1, 1] 的坐标空间）。
 
 ## 3. 片段着色器：颜色计算、纹理采样与内置变量
 
@@ -312,4 +312,240 @@ static GLuint CreateProgram(const char* vsSrc, const char* fsSrc) {
 2. 检查旧/新语法是否混用（如 `attribute` + `#version 330`）。
 3. 检查顶点 `out` 与片段 `in` 的类型/名称是否一致。
 4. 立即打印 `glGetShaderInfoLog` 与 `glGetProgramInfoLog`，不要猜。
+
+## 常见错误及解决方案
+
+### 错误 1：`#version` 与上下文不匹配
+
+**现象：** 着色器编译失败，日志提示 `version '330' is not supported` 或 `#version must be first line`。
+
+**原因：** 在 OpenGL ES 2.0 设备上使用了 `#version 330 core`，或源码字符串开头有 BOM / 空行导致 `#version` 不在第一行。
+
+**解决方案：**
+```cpp
+// 根据当前上下文动态选择版本头
+const char* versionHeader;
+#ifdef GL_ES_VERSION_2_0
+    versionHeader = "#version 100\n";       // ES 2.0
+#elif defined(GL_ES_VERSION_3_0)
+    versionHeader = "#version 300 es\n";    // ES 3.0
+#else
+    versionHeader = "#version 330 core\n";  // Desktop GL 3.3+
+#endif
+// 拼接版本头与着色器正文
+std::string fullSrc = std::string(versionHeader) + shaderBody;
+```
+
+### 错误 2：顶点 `out` 与片段 `in` 名称/类型不匹配
+
+**现象：** 编译通过但链接失败，日志出现 `varying variable ... not found` 或 `type mismatch`。片段着色器收到全黑或随机值。
+
+**原因：** 顶点着色器声明 `out vec3 vColor;`，片段着色器写成了 `in vec4 vColor;`（类型不同）或 `in vec3 vertexColor;`（名字不同）。
+
+**解决方案：** 保证名称、类型、精度限定完全一致。推荐把 varying 声明放在公共 `#include` 头文件中：
+```glsl
+// common_varying.glsl —— 顶点和片段着色器都引用
+// 注意：GLSL 没有标准 #include，需要在 C++ 侧拼接
+// 或者使用 GL_ARB_shading_language_include 扩展
+
+// 声明共享变量
+vec2 vTexCoord;
+vec3 vColor;
+```
+
+### 错误 3：ES 片段着色器缺少 `precision` 导致编译失败
+
+**现象：** 桌面端正常，Android/iOS 编译失败，日志提示 `No precision specified for type 'float'`。
+
+**原因：** OpenGL ES 的片段着色器中 `float` 没有默认精度，必须显式声明。
+
+**解决方案：**
+```glsl
+#version 100
+#ifdef GL_ES
+precision mediump float;  // 必须加！mediump 适合大多数场景
+#endif
+// ... 其余代码 ...
+```
+
+## 本节小结
+
+- GLSL 是运行在 GPU 上的着色器语言，核心数据类型包括 `float`、`vec2`/`vec3`/`vec4`、`mat4`、`sampler2D`。
+- 变量限定符在 ES 2.0 和 ES 3.0/Desktop 3.3 之间有语法差异：`attribute`/`varying` (旧) → `in`/`out` (新)。
+- 顶点着色器的核心输出是 `gl_Position`（裁剪空间坐标），片段着色器的核心输出是颜色值（`gl_FragColor` 或自定义 `out`）。
+- 模型/视图/投影（MVP）矩阵链完成从模型空间到裁剪空间的坐标变换。
+- 着色器编译必须检查 `GL_COMPILE_STATUS`，链接必须检查 `GL_LINK_STATUS`，失败时**立即打印日志**。
+- ES 片段着色器必须显式声明 `precision`，否则在移动端编译失败。
+- KrKr2 的 `YUVSprite.cpp` 展示了三纹理 YUV→RGB 采样的真实片段着色器模式。
+
+## 练习题与答案
+
+### 题目 1：将 ES 2.0 着色器升级为 ES 3.0 语法
+
+以下是一对 ES 2.0 着色器代码，请将其改写为 ES 3.0（`#version 300 es`）语法，保持功能不变：
+
+```glsl
+// 顶点着色器 (ES 2.0)
+#version 100
+attribute vec3 aPos;
+attribute vec2 aUV;
+varying vec2 vUV;
+uniform mat4 uMVP;
+void main() {
+    gl_Position = uMVP * vec4(aPos, 1.0);
+    vUV = aUV;
+}
+```
+
+```glsl
+// 片段着色器 (ES 2.0)
+#version 100
+precision mediump float;
+varying vec2 vUV;
+uniform sampler2D uTex;
+void main() {
+    gl_FragColor = texture2D(uTex, vUV);
+}
+```
+
+<details>
+<summary>查看答案</summary>
+
+```glsl
+// 顶点着色器 (ES 3.0)
+#version 300 es
+layout(location = 0) in vec3 aPos;       // attribute → in，并加 layout
+layout(location = 1) in vec2 aUV;        // attribute → in
+out vec2 vUV;                            // varying → out
+uniform mat4 uMVP;                       // uniform 不变
+void main() {
+    gl_Position = uMVP * vec4(aPos, 1.0);
+    vUV = aUV;
+}
+```
+
+```glsl
+// 片段着色器 (ES 3.0)
+#version 300 es
+precision mediump float;                  // ES 仍需精度声明
+in vec2 vUV;                              // varying → in
+uniform sampler2D uTex;                   // uniform 不变
+out vec4 FragColor;                       // 自定义输出替代 gl_FragColor
+void main() {
+    FragColor = texture(uTex, vUV);       // texture2D → texture
+}
+```
+
+**改动要点：**
+1. `#version 100` → `#version 300 es`
+2. `attribute` → `in`（顶点输入）
+3. `varying` → `out`（顶点输出）/ `in`（片段输入）
+4. `gl_FragColor` → 自定义 `out vec4 FragColor`
+5. `texture2D()` → `texture()`
+6. 可选加 `layout(location = N)` 精确绑定属性位置
+
+</details>
+
+### 题目 2：分析 KrKr2 YUV 着色器的精度选择
+
+在本节代码示例 4 中，KrKr2 的 YUV 片段着色器使用了 `precision lowp float` 而非 `mediump`。回答以下问题：
+
+1. `lowp`、`mediump`、`highp` 三种精度在 ES 规范中的**最低保证精度范围**分别是什么？
+2. `lowp` 能正确表示 YUV 到 RGB 转换系数（如 `1.164`、`-0.392`）吗？可能有什么问题？
+3. 如果在高分辨率屏幕（如 4K）上发现颜色出现条带（banding），应该如何改？
+
+<details>
+<summary>查看答案</summary>
+
+1. **精度范围（ES 规范最低保证）：**
+   - `lowp`：范围 [-2, 2]，精度 1/256（8 位定点或等价浮点）
+   - `mediump`：范围 [-2¹⁴, 2¹⁴]，精度 1/1024（10 位尾数浮点或等价）
+   - `highp`：范围 [-2⁶², 2⁶²]，精度 1/65536（IEEE 754 float32 等价）
+
+2. **能否表示 YUV 系数：**
+   `lowp` 范围是 [-2, 2]，系数 `1.164`、`1.596`、`2.017` 均在此范围内，所以**数值上可表示**。但精度只有 1/256，这意味着颜色分量计算精度约为 8 位。对于视频帧来说勉强够用（视频源本身通常是 8-bit YUV），但中间运算的**累积精度误差**可能导致颜色偏差。尤其是 `2.017` 接近 `lowp` 范围上限，乘法后容易溢出或精度损失。
+
+3. **解决色带问题：**
+   将 `precision lowp float` 改为 `precision mediump float`。这将精度提升到 10+ 位，足以消除大多数可见色带。如果仍有问题（极端情况），可在特定变量上声明 `highp`：
+   ```glsl
+   precision mediump float;
+   // 对 YUV 转换矩阵使用更高精度
+   highp mat3 m = mat3(1.164, 1.164, 1.164,
+                        0.0,  -0.392, 2.017,
+                        1.596, -0.813, 0.0);
+   highp vec3 rgb = m * yuv;
+   ```
+
+</details>
+
+### 题目 3：着色器编译错误排查
+
+以下代码在 Desktop GL 3.3 上编译失败。找出所有错误并修复：
+
+```glsl
+#version 330 core
+attribute vec3 aPos;          // ← 错误 1
+varying vec2 vTexCoord;       // ← 错误 2
+uniform mat4 uMVP;
+
+void main() {
+    gl_Position = uMVP * vec4(aPos, 1.0);
+    vTexCoord = vec2(0.0, 0.0);
+}
+```
+
+```glsl
+#version 330 core
+precision mediump float;      // ← 错误 3
+varying vec2 vTexCoord;       // ← 错误 4
+
+void main() {
+    gl_FragColor = vec4(1.0);  // ← 错误 5
+}
+```
+
+<details>
+<summary>查看答案</summary>
+
+**错误分析与修复：**
+
+| 行 | 错误 | 原因 | 修复 |
+|---|---|---|---|
+| VS: `attribute` | 旧语法用在 `#version 330 core` | 330 core 不支持 `attribute` | 改为 `layout(location = 0) in vec3 aPos;` |
+| VS: `varying` | 旧语法用在 `#version 330 core` | 330 core 不支持 `varying` | 改为 `out vec2 vTexCoord;` |
+| FS: `precision mediump float` | Desktop GL 不需要/不支持 | `precision` 是 ES 专用语法 | 删除这行（或用 `#ifdef GL_ES` 包裹） |
+| FS: `varying` | 同上，旧语法 | 330 core 不支持 | 改为 `in vec2 vTexCoord;` |
+| FS: `gl_FragColor` | 旧内置变量 | 330 core 中已移除 | 改为自定义 `out vec4 FragColor;`，`main()` 中写 `FragColor = ...;` |
+
+**修复后完整代码：**
+
+```glsl
+// 顶点着色器（修复后）
+#version 330 core
+layout(location = 0) in vec3 aPos;
+out vec2 vTexCoord;
+uniform mat4 uMVP;
+
+void main() {
+    gl_Position = uMVP * vec4(aPos, 1.0);
+    vTexCoord = vec2(0.0, 0.0);
+}
+```
+
+```glsl
+// 片段着色器（修复后）
+#version 330 core
+in vec2 vTexCoord;
+out vec4 FragColor;
+
+void main() {
+    FragColor = vec4(1.0);
+}
+```
+
+</details>
+
+## 下一步
+
+下一节 [Uniform 与平台差异](./02-Uniform与平台差异.md) 将讲解如何从 C++ 侧向着色器传递 Uniform 数据（矩阵、颜色、纹理采样器等），以及不同平台（Desktop GL / ES 2.0 / ES 3.0）在 Uniform 处理上的差异和兼容策略。
 

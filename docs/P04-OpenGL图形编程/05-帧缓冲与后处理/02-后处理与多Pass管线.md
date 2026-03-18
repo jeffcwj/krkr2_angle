@@ -1,3 +1,20 @@
+# 后处理与多 Pass 管线
+
+> **所属模块：** P04-OpenGL 图形编程  
+> **前置知识：** [帧缓冲基础与创建](./01-帧缓冲基础与创建.md)、[着色器编程](../03-着色器编程/01-GLSL语言与着色器阶段.md)、纹理采样基础  
+> **预计阅读时间：** 50 分钟
+
+## 本节目标
+
+读完本节后，你将能够：
+
+1. 区分 RBO（Renderbuffer Object，渲染缓冲对象——一种只写的离屏缓冲区）与纹理附件的适用场景。
+2. 创建深度纹理附件用于阴影映射（shadow mapping，一种通过从光源视角渲染深度图来计算阴影的技术）等高级效果。
+3. 实现灰度化、核卷积（锐化）、高斯模糊、边缘检测四种后处理效果。
+4. 使用 Ping-Pong FBO（帧缓冲对象，Frame Buffer Object）技术实现多 Pass（多次渲染遍历）后处理管线。
+5. 处理窗口大小变化时 FBO 的重建逻辑。
+6. 理解 FBO 在 Desktop GL 与 OpenGL ES 2.0/3.0 之间的差异及兼容写法。
+
 ## 渲染缓冲对象（RBO）详解
 
 ### RBO vs 纹理附件的选择
@@ -347,7 +364,229 @@ void onWindowResize(int newWidth, int newHeight) {
     glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8,
                           width, height);
     glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT,
-                              GL_RENDERBUFFER, rbo);
+                               GL_RENDERBUFFER, rbo);
 #endif
 ```
+
+## 动手实践
+
+### 实践 1：实现灰度化后处理
+
+按以下步骤实现：
+
+1. 创建一个 FBO，附加一张颜色纹理和一个 RBO 深度/模板附件。
+2. 第一遍（Pass 1）：将 3D 场景（或简单的彩色三角形）渲染到 FBO。
+3. 第二遍（Pass 2）：绑定默认帧缓冲（`glBindFramebuffer(GL_FRAMEBUFFER, 0)`），用全屏四边形 + 灰度化片段着色器绘制 FBO 的颜色纹理。
+
+```cpp
+// 全屏四边形顶点数据（NDC 坐标 + 纹理坐标）
+float quadVertices[] = {
+    // 位置x, 位置y,  纹理u, 纹理v
+    -1.0f,  1.0f,     0.0f, 1.0f,   // 左上
+    -1.0f, -1.0f,     0.0f, 0.0f,   // 左下
+     1.0f, -1.0f,     1.0f, 0.0f,   // 右下
+
+    -1.0f,  1.0f,     0.0f, 1.0f,   // 左上
+     1.0f, -1.0f,     1.0f, 0.0f,   // 右下
+     1.0f,  1.0f,     1.0f, 1.0f    // 右上
+};
+
+// 设置全屏四边形 VAO/VBO
+GLuint quadVAO, quadVBO;
+glGenVertexArrays(1, &quadVAO);
+glGenBuffers(1, &quadVBO);
+glBindVertexArray(quadVAO);
+glBindBuffer(GL_ARRAY_BUFFER, quadVBO);
+glBufferData(GL_ARRAY_BUFFER, sizeof(quadVertices), quadVertices, GL_STATIC_DRAW);
+// 位置属性
+glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)0);
+glEnableVertexAttribArray(0);
+// 纹理坐标属性
+glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)(2 * sizeof(float)));
+glEnableVertexAttribArray(1);
+glBindVertexArray(0);
+
+// 绘制全屏四边形
+void drawFullscreenQuad() {
+    glBindVertexArray(quadVAO);
+    glDrawArrays(GL_TRIANGLES, 0, 6);  // 两个三角形组成全屏矩形
+    glBindVertexArray(0);
+}
+```
+
+### 实践 2：Ping-Pong 高斯模糊
+
+在实践 1 的基础上，创建两个 FBO（FBO_A 和 FBO_B），先水平模糊再垂直模糊。可以通过增加迭代次数（多次水平+垂直）来增强模糊强度。
+
+## 对照项目源码
+
+KrKr2 项目中帧缓冲与后处理相关代码：
+
+| 文件 | 行号范围 | 内容 |
+|------|---------|------|
+| `cpp/core/visual/ogl/RenderManager_ogl.cpp` | 469-471 | 全局 FBO 变量 `_FBO` 和 `_CurrentRenderTarget`，引擎使用单个全局 FBO 进行离屏渲染 |
+| `cpp/core/visual/ogl/RenderManager_ogl.cpp` | 463-468 | `GLVertexInfo` 结构体，存储纹理指针与顶点坐标，用于后续绘制 |
+| `cpp/core/visual/ogl/RenderManager_ogl.cpp` | 2300-2371 | 纹理恢复路径使用硬编码 NDC 全屏四边形坐标 + `glDrawArrays(GL_TRIANGLES, 0, 6)`，本质就是一个后处理 Pass |
+| `cpp/core/visual/ogl/RenderManager_ogl.cpp` | 1860-2060 | 动态着色器编译系统（`CompileShader`、`CombineProgram`），支持运行时组合多种后处理效果 |
+
+**关键模式观察：**
+
+1. **KrKr2 不直接使用多 Pass 后处理：** 引擎主要通过 Cocos2d-x 的渲染命令队列实现效果叠加，而非手动 Ping-Pong FBO。
+2. **FBO 管理是全局的：** `TVPSetRenderTarget` 函数控制渲染目标切换，简化了 FBO 生命周期管理。
+3. **全屏四边形模式一致：** 引擎中 NDC 四边形的写法（两个三角形，6 个顶点）与本节讲解的方式完全相同。
+
+## 常见错误及解决方案
+
+### 错误 1：后处理画面上下颠倒
+
+**现象：** 后处理效果应用后，画面上下翻转。
+
+**原因：** FBO 纹理的坐标原点在左下角（OpenGL 默认），但渲染循环可能假设左上角为原点。全屏四边形的纹理坐标映射反了。
+
+**解决方案：** 检查全屏四边形的纹理坐标 V 分量是否正确。如果画面颠倒，将 V 坐标翻转（`1.0 - v`），或在顶点着色器中做翻转：
+```glsl
+TexCoord = vec2(aTexCoord.x, 1.0 - aTexCoord.y); // 翻转 V 轴
+```
+
+### 错误 2：Ping-Pong 模糊结果全黑
+
+**现象：** 第一个 Pass 正常，切换到第二个 FBO 后输出全黑。
+
+**原因：** 在 Pass 2 绑定 FBO_B 之前没有解绑 FBO_A 的纹理，导致"同时读写同一纹理"——这在 OpenGL 中是未定义行为。
+
+**解决方案：** 确保每个 Pass 绑定的**输入纹理**和**输出 FBO 的附件纹理**不是同一个对象：
+```cpp
+// Pass 1: FBO_A → 处理 → FBO_B
+glBindFramebuffer(GL_FRAMEBUFFER, pingpongFBO[1]);    // 输出到 FBO_B
+glActiveTexture(GL_TEXTURE0);
+glBindTexture(GL_TEXTURE_2D, pingpongTex[0]);          // 读取 FBO_A 的纹理
+// ↑ pingpongTex[0] 和 pingpongFBO[1] 的附件是不同纹理 ✅
+```
+
+### 错误 3：窗口缩放后后处理效果拉伸或模糊
+
+**现象：** 调整窗口大小后，后处理效果出现拉伸、模糊或分辨率不匹配。
+
+**原因：** 窗口大小变了但 FBO 纹理没有重建，仍然是旧分辨率。
+
+**解决方案：** 在窗口 resize 回调中重建所有 FBO 纹理和 RBO：
+```cpp
+void onResize(int w, int h) {
+    glViewport(0, 0, w, h);                      // 更新视口
+    // 重建每个 FBO 的颜色纹理
+    for (int i = 0; i < 2; i++) {
+        glBindTexture(GL_TEXTURE_2D, pingpongTex[i]);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0,
+                     GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+    }
+    // 别忘了重建 RBO（如果有深度/模板）
+    glBindRenderbuffer(GL_RENDERBUFFER, rbo);
+    glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, w, h);
+}
+```
+
+## 本节小结
+
+- **RBO vs 纹理附件**：RBO 只写不可采样，适合深度/模板附件；纹理附件可采样，适合颜色附件和需要后续读取的场景。
+- **后处理核心模式**：渲染到 FBO → 全屏四边形 + 后处理着色器 → 输出到默认帧缓冲。
+- **四种基础后处理效果**：灰度化（亮度加权）、锐化（核卷积）、高斯模糊（分离式两 Pass）、边缘检测（Sobel 算子）。
+- **Ping-Pong FBO**：串联多个后处理效果的标准技术，交替使用两个 FBO 避免同时读写同一纹理。
+- **窗口缩放时必须重建 FBO**：纹理和 RBO 都需要按新分辨率重新分配。
+- **ES 2.0 兼容性**：深度+模板需分开创建；不支持 `GL_CLAMP_TO_BORDER`；不支持 MRT；不支持 `glBlitFramebuffer`。
+
+## 练习题与答案
+
+### 题目 1：实现色调反转后处理
+
+编写一个片段着色器，将输入图像的颜色进行反转（即 `1.0 - color`），同时保持 Alpha 通道不变。
+
+<details>
+<summary>查看答案</summary>
+
+```glsl
+#version 330 core
+in vec2 TexCoord;
+out vec4 FragColor;
+uniform sampler2D screenTexture;
+
+void main() {
+    vec4 color = texture(screenTexture, TexCoord); // 采样 FBO 颜色纹理
+    FragColor = vec4(1.0 - color.rgb, color.a);    // RGB 反转，Alpha 保持
+}
+```
+
+**关键点：** `1.0 - color.rgb` 利用了 GLSL 的标量-向量运算广播。如果写成 `vec3(1.0) - color.rgb` 效果完全相同，但前者更简洁。
+
+</details>
+
+### 题目 2：分析 Ping-Pong 迭代次数对模糊强度的影响
+
+如果把高斯模糊的 Ping-Pong 迭代从 2 次（水平+垂直各 1 次）增加到 10 次（水平+垂直各 5 次），请回答：
+
+1. 模糊的视觉效果有什么变化？
+2. 性能开销如何变化？
+3. 有没有比增加迭代次数更高效的方式来增强模糊强度？
+
+<details>
+<summary>查看答案</summary>
+
+1. **视觉变化：** 模糊半径显著增大，图像细节更加模糊。多次迭代高斯模糊等价于使用更大 sigma 值的单次高斯模糊（根据卷积定理，多次高斯卷积的 sigma 按 `sqrt(σ1² + σ2² + ...)` 叠加）。
+
+2. **性能开销：** 线性增长。每次迭代都是一个完整的全屏 Pass（绑定 FBO → 绑定纹理 → 绘制全屏四边形），所以 10 次迭代的开销约为 2 次的 5 倍。在 4K 分辨率下，每个 Pass 处理约 830 万像素，10 次 = 8300 万次片段着色器调用。
+
+3. **更高效的替代方案：**
+   - **增大采样半径**：在着色器中增加采样点数（如 5-tap → 13-tap），单次 Pass 就能覆盖更大范围。
+   - **降采样模糊**：先将图像缩小到 1/2 或 1/4 分辨率，在低分辨率上做模糊，再放大回来。像素数减少 4-16 倍，性能大幅提升。
+   - **Kawase 模糊**：一种迭代模糊算法，每次迭代使用不同的采样偏移距离，用更少的迭代次数达到相似的模糊效果。
+
+</details>
+
+### 题目 3：ES 2.0 深度+模板创建
+
+在 OpenGL ES 2.0 环境下，编写代码为一个 FBO 添加深度和模板附件。说明为什么不能使用 `GL_DEPTH24_STENCIL8`。
+
+<details>
+<summary>查看答案</summary>
+
+```cpp
+// ES 2.0 不支持 GL_DEPTH24_STENCIL8 合并格式
+// 原因：ES 2.0 规范中没有定义 packed depth-stencil 格式
+// 需要扩展 OES_packed_depth_stencil 才支持，不是所有设备都有
+
+// 标准做法：分别创建深度 RBO 和模板 RBO
+GLuint depthRBO, stencilRBO;
+
+// 创建深度 RBO
+glGenRenderbuffers(1, &depthRBO);                          // 生成 RBO 名称
+glBindRenderbuffer(GL_RENDERBUFFER, depthRBO);              // 绑定
+glRenderbufferStorage(GL_RENDERBUFFER,
+                      GL_DEPTH_COMPONENT16,                 // ES 2.0 只保证 16 位深度
+                      width, height);                       // 尺寸
+glFramebufferRenderbuffer(GL_FRAMEBUFFER,
+                          GL_DEPTH_ATTACHMENT,               // 附加到深度附件点
+                          GL_RENDERBUFFER, depthRBO);
+
+// 创建模板 RBO
+glGenRenderbuffers(1, &stencilRBO);
+glBindRenderbuffer(GL_RENDERBUFFER, stencilRBO);
+glRenderbufferStorage(GL_RENDERBUFFER,
+                      GL_STENCIL_INDEX8,                    // 8 位模板
+                      width, height);
+glFramebufferRenderbuffer(GL_FRAMEBUFFER,
+                          GL_STENCIL_ATTACHMENT,             // 附加到模板附件点
+                          GL_RENDERBUFFER, stencilRBO);
+
+// 检查 FBO 完整性
+if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
+    // 处理错误
+}
+```
+
+**为什么不能用 `GL_DEPTH24_STENCIL8`：** 该格式在 ES 2.0 核心规范中未定义。ES 2.0 只要求支持 `GL_DEPTH_COMPONENT16` 和 `GL_STENCIL_INDEX8`。合并的深度-模板格式需要 `OES_packed_depth_stencil` 扩展，而这个扩展并非所有 ES 2.0 设备都支持。ES 3.0 才将 `GL_DEPTH24_STENCIL8` 纳入核心规范。
+
+</details>
+
+## 下一步
+
+下一节 [实践与常见错误](./03-实践与常见错误.md) 将综合本章所有 FBO 知识，通过一个完整的多效果后处理 Demo 进行实战练习，并深入分析 FBO 相关的调试技巧与跨平台陷阱。
 

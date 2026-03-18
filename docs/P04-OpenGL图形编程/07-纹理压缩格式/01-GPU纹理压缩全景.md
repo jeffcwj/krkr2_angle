@@ -1,7 +1,7 @@
 # 纹理压缩格式
 
 > 所属模块：P04-OpenGL图形编程  
-> 前置知识：06-OpenGL-ES差异、纹理采样、Mipmap、着色器基础  
+> 前置知识：06-OpenGL-ES差异、纹理采样、Mipmap（一组逐级缩小的纹理副本，用于在远距离观察时减少闪烁和提高采样效率，详见第 4 章）、着色器基础  
 > 预计阅读时间：85分钟
 
 ## 本节目标
@@ -412,4 +412,178 @@ PVRTexToolCLI -i ./input/effect.png -o ./out_pvrtc/effect.pvr -f PVRTC1_4,UBN,lR
 2. NPOT 纹理块计算错误：症状是边缘花屏或 `GL_INVALID_VALUE`；解决是块数向上取整并补齐边缘块。  
 3. mipmap 大小链不匹配：症状是远景闪烁或采样异常；解决是离线生成完整 mip 并逐层校验 `imageSize`。  
 4. ETC1 用于透明纹理：症状是 Alpha 丢失与黑边；解决是改用 ETC2 RGBA 或 ETC1+Alpha 分离方案。
+
+## 本节小结
+
+- **GPU 纹理压缩 ≠ 文件压缩**：PNG/JPEG 解决文件体积，BC/ETC/PVRTC/ASTC 解决运行时显存占用与采样带宽。
+- **块压缩原理**：主流格式都采用 4×4（或更大）固定大小块，每块编码为固定长度字节，确保 GPU 随机访问可预测。
+- **四大格式族：**
+  - **BC/S3TC（DXT）**：桌面端成熟标准，BC1 不透明、BC3 透明、BC5 法线。
+  - **PVRTC**：PowerVR/iOS 生态，2bpp 或 4bpp。
+  - **ETC1/ETC2**：Android ES2/ES3 标准，ETC1 不支持 Alpha。
+  - **ASTC**：现代标准，块大小可调（4×4 到 12×12），质量最高。
+- **格式选择依赖平台**：启动时通过 `glGetIntegerv(GL_COMPRESSED_TEXTURE_FORMATS, ...)` 查询实际支持集，按优先级回退。
+- **KrKr2 自带三个实时编码器**：PVRTC（`pvrtc.h`）、ETC（`etcpak.h`）、ASTC（`astcrt.h`），在 `RenderManager_ogl.cpp` 中统一管理。
+- 上传压缩纹理使用 `glCompressedTexImage2D`，最常见错误是 `imageSize` 参数传了未压缩字节数。
+
+## 练习题与答案
+
+### 题目 1：压缩纹理大小计算
+
+一张 `1920×1080` 的纹理，分别使用以下格式存储**单层（不含 Mipmap）**，计算显存占用：
+
+1. 未压缩 RGBA8
+2. BC1（DXT1）：4bpp，块 4×4，每块 8 字节
+3. ASTC 6×6：块 6×6，每块 16 字节
+4. PVRTC 2bpp
+
+<details>
+<summary>查看答案</summary>
+
+**1. 未压缩 RGBA8：**
+```
+1920 × 1080 × 4 字节 = 8,294,400 字节 ≈ 7.91 MB
+```
+
+**2. BC1（4bpp）：**
+```
+块数 X = ceil(1920 / 4) = 480
+块数 Y = ceil(1080 / 4) = 270
+字节数 = 480 × 270 × 8 = 1,036,800 字节 ≈ 0.99 MB
+压缩比：8,294,400 / 1,036,800 = 8:1 ✅
+```
+
+**3. ASTC 6×6：**
+```
+块数 X = ceil(1920 / 6) = 320
+块数 Y = ceil(1080 / 6) = 180
+字节数 = 320 × 180 × 16 = 921,600 字节 ≈ 0.88 MB
+压缩比：8,294,400 / 921,600 ≈ 9:1
+```
+
+**4. PVRTC 2bpp：**
+```
+字节数 = 1920 × 1080 × 2 / 8 = 518,400 字节 ≈ 0.49 MB
+压缩比：8,294,400 / 518,400 = 16:1
+```
+
+**对比总结表：**
+
+| 格式 | 大小 | 相比 RGBA8 |
+|------|------|-----------|
+| RGBA8 | 7.91 MB | 1× |
+| BC1 | 0.99 MB | 8× 压缩 |
+| ASTC 6×6 | 0.88 MB | ~9× 压缩 |
+| PVRTC 2bpp | 0.49 MB | 16× 压缩 |
+
+</details>
+
+### 题目 2：运行时格式选择逻辑
+
+编写一个 C++ 函数 `selectTextureFormat()`，根据以下优先级选择最佳压缩格式：
+1. 优先 ASTC 4×4（如果支持）
+2. 其次 ETC2 RGBA（如果支持且需要 Alpha）
+3. 其次 BC3（如果支持且需要 Alpha）
+4. 其次 ETC1（如果支持且不需要 Alpha）
+5. 最终回退到 RGBA8（未压缩）
+
+函数签名：`GLenum selectTextureFormat(bool needAlpha)`
+
+<details>
+<summary>查看答案</summary>
+
+```cpp
+#include <set>
+#include <vector>
+
+// 预定义 GL 枚举值
+#ifndef GL_COMPRESSED_RGBA_ASTC_4x4_KHR
+#define GL_COMPRESSED_RGBA_ASTC_4x4_KHR      0x93B0
+#endif
+#ifndef GL_COMPRESSED_RGBA8_ETC2_EAC
+#define GL_COMPRESSED_RGBA8_ETC2_EAC          0x9278
+#endif
+#ifndef GL_COMPRESSED_RGBA_S3TC_DXT5_EXT
+#define GL_COMPRESSED_RGBA_S3TC_DXT5_EXT      0x83F3
+#endif
+#ifndef GL_ETC1_RGB8_OES
+#define GL_ETC1_RGB8_OES                      0x8D64
+#endif
+
+// 查询 GPU 支持的压缩格式集合
+std::set<GLenum> getSupportedFormats() {
+    GLint count = 0;
+    glGetIntegerv(GL_NUM_COMPRESSED_TEXTURE_FORMATS, &count);
+    std::set<GLenum> formats;
+    if (count > 0) {
+        std::vector<GLint> arr(static_cast<size_t>(count));
+        glGetIntegerv(GL_COMPRESSED_TEXTURE_FORMATS, arr.data());
+        for (GLint f : arr) {
+            formats.insert(static_cast<GLenum>(f));
+        }
+    }
+    return formats;
+}
+
+GLenum selectTextureFormat(bool needAlpha) {
+    static std::set<GLenum> supported = getSupportedFormats(); // 只查询一次
+
+    // 1. ASTC 4×4（最高质量，支持 Alpha）
+    if (supported.count(GL_COMPRESSED_RGBA_ASTC_4x4_KHR)) {
+        return GL_COMPRESSED_RGBA_ASTC_4x4_KHR;
+    }
+
+    // 2. ETC2 RGBA（Android ES3+ 标准）
+    if (needAlpha && supported.count(GL_COMPRESSED_RGBA8_ETC2_EAC)) {
+        return GL_COMPRESSED_RGBA8_ETC2_EAC;
+    }
+
+    // 3. BC3/DXT5（桌面端，支持 Alpha）
+    if (needAlpha && supported.count(GL_COMPRESSED_RGBA_S3TC_DXT5_EXT)) {
+        return GL_COMPRESSED_RGBA_S3TC_DXT5_EXT;
+    }
+
+    // 4. ETC1（不需要 Alpha 时）
+    if (!needAlpha && supported.count(GL_ETC1_RGB8_OES)) {
+        return GL_ETC1_RGB8_OES;
+    }
+
+    // 5. 最终回退：未压缩 RGBA8
+    return GL_RGBA;
+}
+```
+
+**关键点：**
+- 使用 `static` 缓存查询结果，避免每次加载纹理都调用 `glGetIntegerv`。
+- 优先级顺序考虑了跨平台覆盖面（ASTC 覆盖最广）和质量（ASTC > ETC2 > BC3）。
+- 回退到 `GL_RGBA` 意味着使用未压缩纹理，显存占用会高 4-8 倍，但至少不会黑屏。
+
+</details>
+
+### 题目 3：分析 KrKr2 压缩格式检测
+
+阅读 `RenderManager_ogl.cpp` 第 193-208 行的格式检测代码，回答：
+
+1. KrKr2 使用什么方法检测 GPU 支持哪些压缩格式？
+2. 为什么这比单纯检查扩展字符串更可靠？
+3. KrKr2 的 `TVPIsSupportTextureFormat` 函数的作用是什么？
+
+<details>
+<summary>查看答案</summary>
+
+1. **检测方法：** KrKr2 使用 `glGetIntegerv(GL_NUM_COMPRESSED_TEXTURE_FORMATS, ...)` 获取支持的压缩格式数量，然后用 `glGetIntegerv(GL_COMPRESSED_TEXTURE_FORMATS, ...)` 获取完整的格式枚举列表，存入一个集合中供后续查询。
+
+2. **为什么比扩展字符串更可靠：**
+   - 扩展字符串（`glGetString(GL_EXTENSIONS)`）只告诉你**哪些扩展已加载**，但同一个扩展可能包含多个格式，你无法确定具体支持哪些子格式。
+   - `GL_COMPRESSED_TEXTURE_FORMATS` 返回的是 GPU 驱动实际支持的**具体格式枚举值列表**，精确到每一个格式变体。
+   - 某些驱动可能支持格式但没有暴露对应扩展字符串（反之亦然，虽然少见）。
+   - 直接查询格式列表是 OpenGL 规范推荐的做法。
+
+3. **`TVPIsSupportTextureFormat` 的作用：** 这是一个查询函数，接受一个 GL 格式枚举值（如 `GL_COMPRESSED_RGBA_ASTC_4x4_KHR`），返回该格式是否在启动时检测到的支持集合中。其他模块（如纹理加载器、压缩编码器）通过调用该函数决定是否使用某种压缩格式，如果不支持则回退到其他格式或未压缩 RGBA。
+
+</details>
+
+## 下一步
+
+下一节 [压缩纹理加载实战](./02-压缩纹理加载实战.md) 将详细讲解如何从文件加载压缩纹理数据（KTX、PVR、DDS 容器格式），上传到 GPU 并正确设置 Mipmap 链，以及处理加载失败时的回退策略。
 

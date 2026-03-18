@@ -157,7 +157,7 @@ ctest --test-dir out/<platform>/debug --output-on-failure
 
 - **语言要求：** 新增文档、注释、文档文件名均使用中文
 - **AGENTS.md 维护：** 新增模块/目录时同步更新对应 AGENTS.md；子文件不得重复父文件已有内容
-- **文档目录：** `docs/` 为教程文档根目录，按模块分文件夹、章节分子文件夹、节分 .md 文件
+- **文档目录：** `krkr2/docs/` 为教程文档根目录（注意是 krkr2 子目录下的 docs/，不是项目根目录的 docs/），按模块分文件夹、章节分子文件夹、节分 .md 文件。**绝不要把文档放到项目根目录的 `docs/`**
 - **插件清单：** `doc/krkr2_plugins.md` 记录了完整插件列表（含已实现/未实现/无源码），新增插件实现后需更新
 - **格式规范：** C++ 代码遵循 clang-format 20 (LLVM)，CI 自动检查；文档使用 Markdown
 - **依赖管理：** 新增第三方库必须通过 vcpkg.json 添加，优先使用 overlay ports (`vcpkg/`)
@@ -298,7 +298,9 @@ ctest --test-dir out/<platform>/debug --output-on-failure
 | P08-编译原理基础 | ✅ 已完成 | 24 md + README | 7章拆分为子目录，每章3-4节（含MiniScript实战） |
 | P09-逆向工程入门 | ✅ 已完成 | 19 md + README | 6章拆分为子目录，每章3-4节（含KiriKiri插件逆向实战） |
 | P10-Cocos2d-x框架 | ✅ 已完成 | 16 md + README | 5章拆分为子目录，每章3-4节（含KrKr2 Cocos2d集成实战） |
+| M04-渲染子系统 | ✅ 已完成 | 22 md + README | 7章拆分为子目录，每章3节（含过渡效果、软件渲染、OGL后端、添加新图像格式实战） |
 | M05-音频子系统 | ✅ 已完成 | 16 md + README | 5章拆分为子目录，每章3节（含FLAC解码器实战） |
+| M06-视频播放器 | ✅ 已完成 | 18 md + README | 6章拆分为子目录，每章3节（含AV不同步排查、解码失败分析、性能瓶颈定位实战） |
 
 ## 项目目标
 

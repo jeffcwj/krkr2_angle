@@ -297,6 +297,7 @@ ctest --test-dir out/<platform>/debug --output-on-failure
 | P07-OpenAL音频编程 | ✅ 已完成 | 14 md + README | 4章拆分为子目录，每章2-5节 |
 | P08-编译原理基础 | ✅ 已完成 | 24 md + README | 7章拆分为子目录，每章3-4节（含MiniScript实战） |
 | P09-逆向工程入门 | ✅ 已完成 | 19 md + README | 6章拆分为子目录，每章3-4节（含KiriKiri插件逆向实战） |
+| P10-Cocos2d-x框架 | ✅ 已完成 | 16 md + README | 5章拆分为子目录，每章3-4节（含KrKr2 Cocos2d集成实战） |
 
 ## 项目目标
 

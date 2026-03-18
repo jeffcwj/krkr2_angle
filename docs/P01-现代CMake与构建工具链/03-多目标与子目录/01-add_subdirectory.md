@@ -285,6 +285,49 @@ message(STATUS "[root] PROJECT_FLAVOR=${PROJECT_FLAVOR}")
 
 在 `libs/text/CMakeLists.txt` 中加入 `set(PROJECT_FLAVOR "dev-with-text" PARENT_SCOPE)`，并观察父目录输出变化。
 
+## 常见错误及解决方案
+
+### 错误 1：子目录缺少 CMakeLists.txt
+
+**现象：** `add_subdirectory(mylib)` 报 `CMake Error: The source directory ... does not contain a CMakeLists.txt file.`。
+
+**原因：** `add_subdirectory()` 要求目标目录下必须有 `CMakeLists.txt`。如果你只是想引入一个 `.cmake` 脚本文件，应该用 `include()`。
+
+**解决：**
+```cmake
+# 如果 mylib/ 下有 CMakeLists.txt → 用 add_subdirectory
+add_subdirectory(mylib)
+
+# 如果只是一个 .cmake 脚本 → 用 include
+include(cmake/MyModule.cmake)
+```
+
+### 错误 2：目标重名导致配置失败
+
+**现象：** `CMake Error: add_library cannot create target "utils" because another target with the same name already exists.`。
+
+**原因：** 在整个 CMake 配置图中，**目标名称必须全局唯一**。两个子目录各自定义了同名目标 `utils` 就会冲突。
+
+**解决：**
+```cmake
+# 为目标名加模块前缀
+add_library(core_utils STATIC utils.cpp)    # core/ 下
+add_library(plugin_utils STATIC utils.cpp)  # plugin/ 下
+```
+
+### 错误 3：子目录定义顺序错误导致链接失败
+
+**现象：** `target_link_libraries(app PRIVATE mylib)` 报 `Cannot specify link libraries for target "app" which is not built by this project.` 或找不到 `mylib`。
+
+**原因：** `add_subdirectory()` 按调用顺序处理。如果 `app` 的子目录在 `mylib` 之前被处理，且 `app/CMakeLists.txt` 中引用了 `mylib`，此时 `mylib` 目标尚未定义。
+
+**解决：**
+```cmake
+# 根 CMakeLists.txt：被依赖的模块先声明
+add_subdirectory(libs/mylib)   # 先定义 mylib
+add_subdirectory(app)          # 后使用 mylib
+```
+
 ## 本节小结
 
 - `add_subdirectory` 是多目录 CMake 工程的主干命令。

@@ -4,16 +4,6 @@
 > **前置知识：** [01-构建系统的演进](./01-构建系统的演进.md)
 > **预计阅读时间：** 20 分钟
 
-## 元数据块
-| 字段 | 内容 |
-|---|---|
-| 章节编号 | P01 / 01 / 02 |
-| 章节名称 | CMake 核心概念 |
-| 适用平台 | Windows / Linux / macOS / Android |
-| 推荐生成器 | Ninja（跨平台一致） |
-| 参考项目 | `krkr2/CMakeLists.txt` |
-| 学完可达成 | 能读懂中大型 CMake 项目的主配置结构 |
-
 ## 本节目标
 
 读完本节后，你将能够：
@@ -232,18 +222,9 @@ cmake --build build --target clean      # 清理当前生成器定义的产物
 
 这一阶段出错通常就是 C++ 编译错误或链接错误，比如未定义符号。
 
-## 本节小结
-
-- `CMakeLists.txt` 是项目的核心配置文件。
-- 始终坚持使用"源外构建"（Out-of-source Build），保持源码整洁。
-- 目标（Target）是 CMake 的核心管理单位。
-- CMake 构建分为配置、生成和构建三个阶段。
-- Property 系统是定位复杂构建问题的关键抓手。
-- 生成器与工具链决定了“产物格式”和“目标平台能力”。
-
 ## 工具链（Toolchain）概念：编译器、链接器与交叉编译
 
-工具链（Toolchain）可以理解为“把源码变成目标平台二进制的一整套工具”，核心组成包括：
+工具链（Toolchain）可以理解为"把源码变成目标平台二进制的一整套工具"，核心组成包括：
 
 1. **编译器（Compiler）**：如 `clang++`、`g++`、`cl`，把 `.cpp` 编译成目标文件。
 2. **链接器（Linker）**：把多个目标文件和库链接成最终产物。
@@ -254,7 +235,7 @@ KrKr2 的顶层配置在 Android 与非 Android 路径上有明显分流：
 - Android 分支会 `include(cmake/vcpkg_android.cmake)`。
 - 其他平台通过 `CMAKE_TOOLCHAIN_FILE` 使用 vcpkg 工具链。
 
-这正是“工具链切换”的典型做法。
+这正是"工具链切换"的典型做法。
 
 ```cmake
 # 示例 7：常见工具链入口（节选思想）
@@ -278,55 +259,9 @@ endif()
 
 KrKr2 的 Android 构建就是一个现实案例。
 
-## 对照 KrKr2 项目源码
-
-下面用 `krkr2/CMakeLists.txt` 的真实配置对照本节概念：
-
-- `cmake_minimum_required(VERSION 3.28)`：定义最低 CMake 版本。
-- `project(${APP_NAME})`：建立工程作用域和语言上下文。
-- `if(ANDROID) elseif(LINUX) elseif(WINDOWS)`：平台分支。
-- `add_library(${PROJECT_NAME} SHARED 平台入口文件)`：Android 下主目标是共享库。
-- `add_executable(${PROJECT_NAME} 平台入口文件)`：Linux/Windows/macOS 下主目标是可执行文件。
-- `add_subdirectory(${KRKR2CORE_PATH})` 与 `add_subdirectory(${KRKR2PLUGIN_PATH})`：模块化组织。
-- `target_link_libraries(${PROJECT_NAME} PUBLIC krkr2plugin krkr2core)`：目标依赖连接。
-
-这说明 KrKr2 已经采用了现代 CMake 的“目标 + 属性 + 目录分层”思路。
-
-## 练习题与答案
-
-### 题目 1：在项目根目录下创建一个名为 build 的文件夹，并在其中运行 cmake ..，这属于哪种构建方式？为什么要这么做？
-
-<details>
-<summary>查看答案</summary>
-
-这属于"源外构建"（Out-of-source Build）。这样做是为了防止 CMake 生成的临时文件（如缓存、中间生成脚本等）污染源码目录。这也有利于版本管理（不需要在 .gitignore 中写一长串临时文件名），并且清理项目非常简单：直接删除整个 build 文件夹即可。
-
-</details>
-
-### 题目 2：如果你在控制台看到 "CMake Error: Could not create named generator" 错误，这通常发生在 CMake 的哪个阶段？
-
-<details>
-<summary>查看答案</summary>
-
-这发生在"配置阶段"（Configure）。这个错误通常意味着你指定的生成器（如 -G "Ninja"）在当前系统中没有安装或不在 PATH 路径中。
-
-</details>
-
-### 题目 3：请列举出至少三种 CMake 目标的类型。
-
-<details>
-<summary>查看答案</summary>
-
-1. 可执行文件（add_executable）
-2. 静态库（add_library STATIC）
-3. 共享库/动态库（add_library SHARED）
-4. 接口库/头文件库（add_library INTERFACE）
-
-</details>
-
 ## 动手实践
 
-下面给你一个“最小但完整”的实践任务：创建一个同时包含可执行文件、静态库与接口库的小项目。
+下面给你一个"最小但完整"的实践任务：创建一个同时包含可执行文件、静态库与接口库的小项目。
 
 ### 步骤 1：目录结构
 
@@ -395,6 +330,105 @@ cmake --build build
 # Linux/macOS
 ./build/practice_app
 ```
+
+## 对照 KrKr2 项目源码
+
+下面用 `krkr2/CMakeLists.txt` 的真实配置对照本节概念：
+
+- `cmake_minimum_required(VERSION 3.28)`：定义最低 CMake 版本。
+- `project(${APP_NAME})`：建立工程作用域和语言上下文。
+- `if(ANDROID) elseif(LINUX) elseif(WINDOWS)`：平台分支。
+- `add_library(${PROJECT_NAME} SHARED 平台入口文件)`：Android 下主目标是共享库。
+- `add_executable(${PROJECT_NAME} 平台入口文件)`：Linux/Windows/macOS 下主目标是可执行文件。
+- `add_subdirectory(${KRKR2CORE_PATH})` 与 `add_subdirectory(${KRKR2PLUGIN_PATH})`：模块化组织。
+- `target_link_libraries(${PROJECT_NAME} PUBLIC krkr2plugin krkr2core)`：目标依赖连接。
+
+这说明 KrKr2 已经采用了现代 CMake 的"目标 + 属性 + 目录分层"思路。
+
+## 常见错误及解决方案
+
+### 错误 1：配置通过但构建时报"找不到头文件"
+
+**现象：** `cmake -S . -B build` 成功，但 `cmake --build build` 报 `fatal error: xxx.h: No such file or directory`。
+
+**原因：** 配置阶段只检查 CMake 语法和基本工具链，不会验证每个 `#include` 是否存在。`target_include_directories()` 路径写错或漏写时，要到构建阶段编译器才报错。
+
+**解决：**
+```cmake
+# 确认路径是否正确——打印出来看
+message(STATUS "include 路径: ${CMAKE_CURRENT_SOURCE_DIR}/include")
+target_include_directories(mylib PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+```
+
+### 错误 2：混淆生成器与构建类型
+
+**现象：** 使用 Visual Studio 生成器时，`-DCMAKE_BUILD_TYPE=Debug` 似乎不生效。
+
+**原因：** Visual Studio 是**多配置生成器**（Multi-config Generator），它在一个工程中同时支持 Debug/Release。`CMAKE_BUILD_TYPE` 只对**单配置生成器**（如 Ninja、Makefiles）有效。
+
+**解决：**
+```bash
+# 单配置生成器（Ninja）：配置时指定
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug
+
+# 多配置生成器（Visual Studio）：构建时指定
+cmake -S . -B build -G "Visual Studio 17 2022"
+cmake --build build --config Debug
+```
+
+### 错误 3：源外构建路径写反
+
+**现象：** 运行 `cmake -S build -B .` 导致源码目录被污染。
+
+**原因：** `-S` 是源码目录，`-B` 是构建目录，写反了就相当于源内构建。
+
+**解决：**
+```bash
+# 正确写法：-S 指向源码，-B 指向构建目录
+cmake -S . -B build -G Ninja
+```
+
+## 本节小结
+
+- `CMakeLists.txt` 是项目的核心配置文件。
+- 始终坚持使用"源外构建"（Out-of-source Build），保持源码整洁。
+- 目标（Target）是 CMake 的核心管理单位。
+- CMake 构建分为配置、生成和构建三个阶段。
+- Property 系统是定位复杂构建问题的关键抓手。
+- 生成器与工具链决定了"产物格式"和"目标平台能力"。
+
+## 练习题与答案
+
+### 题目 1：在项目根目录下创建一个名为 build 的文件夹，并在其中运行 cmake ..，这属于哪种构建方式？为什么要这么做？
+
+<details>
+<summary>查看答案</summary>
+
+这属于"源外构建"（Out-of-source Build）。这样做是为了防止 CMake 生成的临时文件（如缓存、中间生成脚本等）污染源码目录。这也有利于版本管理（不需要在 .gitignore 中写一长串临时文件名），并且清理项目非常简单：直接删除整个 build 文件夹即可。
+
+</details>
+
+### 题目 2：如果你在控制台看到 "CMake Error: Could not create named generator" 错误，这通常发生在 CMake 的哪个阶段？
+
+<details>
+<summary>查看答案</summary>
+
+这发生在"配置阶段"（Configure）。这个错误通常意味着你指定的生成器（如 -G "Ninja"）在当前系统中没有安装或不在 PATH 路径中。
+
+</details>
+
+### 题目 3：请列举出至少三种 CMake 目标的类型。
+
+<details>
+<summary>查看答案</summary>
+
+1. 可执行文件（add_executable）
+2. 静态库（add_library STATIC）
+3. 共享库/动态库（add_library SHARED）
+4. 接口库/头文件库（add_library INTERFACE）
+
+</details>
+
 ## 下一步
 
 → 继续阅读 [03-第一个CMake项目](./03-第一个CMake项目.md)

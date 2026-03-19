@@ -23,6 +23,32 @@ KrKr2 模拟器的核心渲染引擎基于 Cocos2d-x，底层使用 OpenGL（桌
 | 07 | [纹理压缩格式](./07-纹理压缩格式/) | PVRTC/ETC1/ETC2/ASTC 原理；GPU 原生解码；运行时格式选择；KrKr2 的纹理策略 |
 | 08 | [实战：2D 精灵渲染器](./08-实战-实现一个2D渲染器/) | 从零实现纹理加载→精灵绘制→Alpha 混合→批量渲染→跨平台运行 |
 
+## 术语预览
+
+上方章节目录中出现了大量 OpenGL 专业术语，先在这里建立印象，各章正文会逐一详细讲解：
+
+| 术语 | 英文 | 一句话解释 |
+|------|------|-----------|
+| VAO | Vertex Array Object | 记录"顶点数据怎么读"的配置对象，绑定后 GPU 就知道如何解析你的顶点缓冲 |
+| VBO | Vertex Buffer Object | 存放顶点坐标、颜色、纹理坐标等数据的 GPU 端缓冲区 |
+| EBO | Element Buffer Object | 存放顶点索引的缓冲区，允许多个三角形共享顶点以节省显存 |
+| GLSL | OpenGL Shading Language | OpenGL 的着色器编程语言，语法类似 C，在 GPU 上运行 |
+| uniform / attribute | — | 着色器输入变量的两种类型：uniform 是全局常量（如投影矩阵），attribute 是逐顶点数据（如位置） |
+| varying / in / out | — | 着色器之间传递数据的关键字，顶点着色器的 out 会插值后传给片段着色器的 in |
+| Mipmap | — | 预生成的多级缩小版纹理（1/2、1/4、1/8...），让远处物体纹理不闪烁，GPU 自动选择合适的级别 |
+| FBO | Framebuffer Object | GPU 上的一块"画布"，可以把渲染结果画到这里而不是直接显示到屏幕（离屏渲染的基础） |
+| RBO | Renderbuffer Object | 类似纹理但不能被采样的存储，专用于深度测试/模板测试的高效缓冲 |
+| 离屏渲染 | Off-screen Rendering | 先把画面渲染到一个不可见的 FBO 上，做完后处理再搬到屏幕——实现模糊、泛光等效果的基础 |
+| 多 Pass | Multi-pass Rendering | 把渲染拆成多个阶段，每个阶段（Pass）做一件事，比如第一次画场景、第二次加模糊 |
+| 精度限定符 | Precision Qualifier | OpenGL ES 中用 `lowp`/`mediump`/`highp` 指定变量精度，影响移动端性能和精度 |
+| EGL | — | 连接 OpenGL ES 与平台窗口系统的标准接口（Android/嵌入式设备上用它创建 GL 上下文） |
+| PVRTC | PowerVR Texture Compression | PowerVR GPU（iOS/部分 Android）的专用纹理压缩格式，大幅减少显存占用 |
+| ETC1 / ETC2 | Ericsson Texture Compression | Android 平台的标准纹理压缩格式，ETC1 不支持透明通道，ETC2 支持 |
+| ASTC | Adaptive Scalable Texture Compression | 新一代通用纹理压缩格式，支持多种压缩率，OpenGL ES 3.2+ 标配 |
+| Alpha 混合 | Alpha Blending | 用像素的透明度值（Alpha）将前景和背景颜色按比例混合，实现半透明效果 |
+| draw call | — | CPU 向 GPU 发出的一次"画这些东西"的指令，数量越多 CPU 开销越大 |
+| 批量渲染 | Batching | 把多个使用相同纹理/着色器的绘制请求合并为一次 draw call，减少 CPU→GPU 通信开销 |
+
 ## 学习路线
 
 ```

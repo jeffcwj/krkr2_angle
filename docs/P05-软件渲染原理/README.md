@@ -17,6 +17,27 @@
 | 04 | [SIMD 优化基础](./04-SIMD优化基础/) | SSE2/SSE4/AVX2 指令集；`_mm_*` intrinsics；批量像素处理；ARM NEON 对比 | 40 分钟 |
 | 05 | [实战：从零实现软件光栅化器](./05-实战-软件光栅化器/) | 画线→填充→纹理映射→Alpha 混合→SIMD 加速的完整实现 | 50 分钟 |
 
+## 术语预览
+
+本模块涉及大量像素处理和 CPU 优化术语，先在这里建立印象，各章正文会逐一详细讲解：
+
+| 术语 | 英文 | 一句话解释 |
+|------|------|-----------|
+| ARGB | Alpha-Red-Green-Blue | 一种像素格式，4 个字节分别存储透明度和三原色——KrKr2 内部统一使用此格式 |
+| 预乘 Alpha | Premultiplied Alpha | 将 RGB 预先乘以 Alpha 的存储方式，简化混合公式并避免半透明边缘白边 |
+| sRGB / 线性 | sRGB / Linear Color Space | sRGB 是显示器使用的非线性颜色空间，计算混合时需先转为线性空间才能得到正确结果 |
+| Porter-Duff | — | 1984 年由 Porter 和 Duff 提出的 12 种图像合成规则，定义了前景与背景如何按 Alpha 值组合 |
+| Alpha 混合 | Alpha Blending | 最常用的 Porter-Duff 模式（SRC_OVER），用前景的 Alpha 值控制前景与背景的混合比例 |
+| tvpgl | TVP Graphics Library | KiriKiri 引擎自带的像素操作 C 函数库，提供 `TVPAlphaBlend` 等 200 多个混合/合成函数 |
+| 双线性插值 | Bilinear Interpolation | 图像缩放时用周围 4 个像素的加权平均估算新像素值，效果比最近邻平滑但会略模糊 |
+| 双三次插值 | Bicubic Interpolation | 图像缩放时用周围 16 个像素做三次多项式插值，比双线性更锐利但计算量更大 |
+| Lanczos | — | 基于 sinc 函数的高质量图像缩放算法，保边能力最强，计算量最大 |
+| SIMD | Single Instruction, Multiple Data | 一条 CPU 指令同时处理多个数据——用于加速像素批量运算（如同时混合 4 个像素） |
+| SSE2 / SSE4 | Streaming SIMD Extensions | Intel/AMD x86 CPU 的 128 位 SIMD 指令集，一次处理 4 个 32 位像素 |
+| AVX2 | Advanced Vector Extensions 2 | x86 CPU 的 256 位 SIMD 指令集，一次处理 8 个 32 位像素 |
+| NEON | ARM Advanced SIMD | ARM CPU（Android/iOS/Apple Silicon）的 128 位 SIMD 指令集，功能类似 SSE |
+| 光栅化 | Rasterization | 将几何图形（线段、三角形）转换为像素网格上的点的过程 |
+
 ## 关键源文件
 
 学习本模块时，建议对照以下 KrKr2 源文件阅读：

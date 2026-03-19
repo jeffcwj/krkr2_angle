@@ -9,13 +9,34 @@
 渲染子系统（`core_visual_module`）是 KrKr2 引擎中规模最大、功能最复杂的核心模块。它负责：
 
 - **图层管理** — 树形图层结构、图层属性（透明度、混合模式、可见性）、绘制顺序
-- **图像加载** — 支持 PNG、JPEG、TLG（KiriKiri 原生）、WebP、BPG、JPEG XR、PVR 七种格式
-- **像素操作** — tvpgl 库提供 200+ 像素级操作函数（混合、合成、滤镜、变换）
-- **OpenGL 渲染** — GPU 加速渲染管线、纹理压缩（PVRTC/ETC/ASTC）、纹理图集
-- **软件渲染** — 纯 CPU 渲染路径、ARGB 颜色空间操作、SIMD 优化框架
+- **图像加载** — 支持 PNG、JPEG、TLG（KiriKiri 引擎原生的图像压缩格式）、WebP、BPG、JPEG XR、PVR 七种格式
+- **像素操作** — tvpgl 库（KiriKiri 引擎自带的像素处理 C 函数库）提供 200+ 像素级操作函数（混合、合成、滤镜、变换）
+- **OpenGL 渲染** — GPU 加速渲染管线、纹理压缩（PVRTC/ETC/ASTC，见下方术语预览）、纹理图集（多张小图拼合为一张大纹理以减少 draw call）
+- **软件渲染** — 纯 CPU 渲染路径、ARGB 颜色空间操作（每个像素 4 字节：透明度+三原色）、SIMD 优化框架（一条指令同时处理多个像素）
 - **过渡效果** — 场景切换动画（淡入淡出、滑动、百叶窗、自定义规则图等）
-- **字体渲染** — FreeType 集成、预渲染字体、字符数据管理
+- **字体渲染** — FreeType（开源字体光栅化引擎）集成、预渲染字体、字符数据管理
 - **视频叠加** — 视频播放覆盖层接口
+
+## 术语预览
+
+本模块涉及大量渲染领域专业术语，先在这里建立印象，各章正文会逐一详细讲解：
+
+| 术语 | 英文 | 一句话解释 |
+|------|------|-----------|
+| tvpgl | TVP Graphics Library | KiriKiri 引擎自带的像素操作 C 函数库（14000+ 行），提供 200 多个混合、合成、滤镜函数 |
+| ARGB | Alpha-Red-Green-Blue | KrKr2 内部使用的像素格式，4 个字节分别存储透明度和三原色（`tjs_uint32` 类型） |
+| 预乘 Alpha | Premultiplied Alpha | 将 RGB 预先乘以 Alpha 值的存储方式，能简化混合公式并避免半透明边缘出现白边 |
+| SIMD | Single Instruction, Multiple Data | 一条 CPU 指令同时处理多个数据的并行技术（如 SSE2 一次处理 4 个像素的混合运算） |
+| TLG | TLG5/TLG6 Image Format | KiriKiri 引擎原生的图像压缩格式，针对视觉小说的立绘和背景优化，支持无损和有损压缩 |
+| PVRTC | PowerVR Texture Compression | PowerVR GPU（iOS/部分 Android）专用的纹理压缩格式，显存占用仅为 RGBA 的 1/8 |
+| ETC | Ericsson Texture Compression | Android 平台标准纹理压缩格式，ETC1 不支持透明通道，ETC2 支持 |
+| ASTC | Adaptive Scalable Texture Compression | 新一代通用纹理压缩格式，支持多种压缩率和通道配置 |
+| FreeType | — | 开源字体光栅化引擎，将 TTF/OTF 字体的矢量轮廓转换为像素位图以供显示 |
+| 纹理图集 | Texture Atlas | 把多张小图拼合到一张大纹理上，减少纹理切换次数从而降低 draw call 开销 |
+| 过渡效果 | Transition Effect | 场景切换时的动画效果（淡入淡出、滑动、百叶窗等），由 TransIntf 接口统一管理 |
+| 规则图 | Rule Image | 一张灰度图定义过渡动画的扩散模式——像素越黑越早切换，实现自定义过渡形状 |
+| RenderManager | — | 渲染管理器抽象基类，KrKr2 同时提供 OGL（GPU 加速）和 software（纯 CPU）两个实现 |
+| draw call | — | CPU 向 GPU 发出的一次"画这些东西"的指令，频繁发出会成为性能瓶颈 |
 
 ## 源码结构
 

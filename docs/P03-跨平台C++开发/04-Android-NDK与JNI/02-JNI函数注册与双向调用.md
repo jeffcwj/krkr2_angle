@@ -1,3 +1,21 @@
+# JNI 函数注册与双向调用
+
+> **所属模块：** P03-跨平台C++开发
+> **前置知识：** [NDK 基础与 JNI 类型系统](./01-NDK基础与JNI类型系统.md)
+> **预计阅读时间：** 25 分钟
+
+## 本节目标
+
+读完本节后，你将能够：
+1. 理解 JNI 静态注册（命名约定）和动态注册（`RegisterNatives`）两种方式的工作原理和适用场景
+2. 追踪 KrKr2 中一个完整的 Java→C++ 下行调用链路（从 `onTouchEvent` 到 Cocos2d 引擎处理）
+3. 理解 `Android_PushEvents` 无锁事件队列的设计——为什么 JNI 调用不能直接操作引擎对象
+4. 使用 `FindClass` + `GetMethodID` + `CallXxxMethod` 三步流程从 C++ 调用 Java 方法
+5. 使用 Cocos2d-x 的 `JniHelper` 简化上行调用的样板代码
+6. 通过 `GetFieldID` + `GetObjectField` 从 C++ 读取 Java 对象的字段
+
+---
+
 ## JNI 函数注册：两种方式
 
 ### 方式一：静态注册（命名约定）
@@ -297,4 +315,212 @@ static std::string GetApkStoragePath() {
 ```
 
 ---
+
+## 常见错误及解决方案
+
+### 错误 1：JNI 签名中漏掉分号
+
+```cpp
+// ❌ 错误：对象类型签名缺少末尾分号
+env->GetStaticMethodID(cls, "myMethod", "(Ljava/lang/String)V");
+//                                                         ^ 少了分号！
+
+// ✅ 正确：对象类型签名必须以分号结尾
+env->GetStaticMethodID(cls, "myMethod", "(Ljava/lang/String;)V");
+//                                                          ^ 必须有分号
+```
+
+**后果：** `GetStaticMethodID` 返回 `nullptr`，后续调用 `CallStaticVoidMethod` 传入空 ID 会导致 JVM 崩溃。
+
+**排查工具：** 使用 `javap -s` 命令自动生成 JNI 签名：
+
+```bash
+# 编译 Java 类后查看签名
+javap -s -classpath . com.example.MyClass
+# 输出示例：
+#   public static void myMethod(java.lang.String);
+#     descriptor: (Ljava/lang/String;)V
+```
+
+### 错误 2：FindClass 在非主线程返回 nullptr
+
+```cpp
+// 在 C++ 工作线程中：
+jclass cls = env->FindClass("org/tvp/kirikiri2/KR2Activity");
+// cls 可能为 nullptr！即使类确实存在
+```
+
+**原因：** `FindClass` 使用调用线程关联的 `ClassLoader`。通过 `AttachCurrentThread` 附加的线程使用系统 `ClassLoader`，它**不包含应用的类**。
+
+**解决方案：** 在 `JNI_OnLoad` 中（此时使用正确的 `ClassLoader`）缓存 `jclass` 为全局引用：
+
+```cpp
+static jclass g_KR2ActivityClass = nullptr;
+
+JNIEXPORT jint JNI_OnLoad(JavaVM *vm, void *reserved) {
+    JNIEnv *env;
+    vm->GetEnv(reinterpret_cast<void **>(&env), JNI_VERSION_1_6);
+
+    // 在主线程中查找并缓存为全局引用
+    jclass localRef = env->FindClass("org/tvp/kirikiri2/KR2Activity");
+    g_KR2ActivityClass = (jclass)env->NewGlobalRef(localRef);
+    env->DeleteLocalRef(localRef);
+
+    return JNI_VERSION_1_6;
+}
+
+// 之后任何线程都可以安全使用 g_KR2ActivityClass
+```
+
+### 错误 3：混淆 static 方法和实例方法的调用
+
+```cpp
+// ❌ 错误：对 static 方法使用 CallVoidMethod（应该用 CallStaticVoidMethod）
+env->CallVoidMethod(cls, mid);  // 崩溃！CallVoidMethod 第一个参数应是 jobject
+
+// ✅ 正确：
+// static 方法 → GetStaticMethodID + CallStaticVoidMethod
+// 实例方法 → GetMethodID + CallVoidMethod(jobject实例, mid, ...)
+```
+
+**记忆规则：** 方法名中带 `Static` 的是一对——`GetStaticMethodID` 配 `CallStaticXxxMethod`，`GetMethodID` 配 `CallXxxMethod`。
+
+---
+
+## 本节小结
+
+- **静态注册**按 `Java_包名_类名_方法名` 命名约定，JVM 自动查找。优点是零配置，缺点是函数名很长
+- **动态注册**在 `JNI_OnLoad` 中通过 `RegisterNatives` 手动建立映射。优点是函数名自由、查找更快，缺点是需要额外注册代码
+- **KrKr2 全部使用静态注册**——简单直接，与 Cocos2d-x 风格一致
+- **下行调用**（Java→C++）：Java 声明 `native` 方法，C++ 用 `JNIEXPORT` 导出实现。KrKr2 通过 `Android_PushEvents` 将 JNI 线程的调用安全投递到 GL 线程
+- **上行调用**（C++→Java）：三步流程 `FindClass` → `GetMethodID` → `CallXxxMethod`。KrKr2 通过 `JniHelper` 封装减少样板代码
+- **字段访问**使用 `GetFieldID` + `GetXxxField`，签名只写字段类型（没有括号）
+- **`JNIEnv*` 是线程专属的**——不能跨线程传递。需要通过 `JavaVM::AttachCurrentThread` 获取当前线程的 `JNIEnv*`
+- **引用管理**是 JNI 易错点：本地引用必须及时 `DeleteLocalRef`，跨调用保存用 `NewGlobalRef`
+
+---
+
+## 练习题与答案
+
+### 题目 1：写出 JNI 签名
+
+写出以下 Java 方法的 JNI 方法签名（descriptor）：
+
+```java
+public static String concat(String a, String b);
+public int[] getPixels(int x, int y, int width, int height);
+public static void callback(byte[] data, long timestamp, boolean compressed);
+```
+
+<details>
+<summary>查看答案</summary>
+
+```
+// static String concat(String a, String b)
+// 参数：String → Ljava/lang/String;  String → Ljava/lang/String;
+// 返回：String → Ljava/lang/String;
+// 签名：(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;
+
+// int[] getPixels(int x, int y, int width, int height)
+// 参数：int → I, int → I, int → I, int → I
+// 返回：int[] → [I
+// 签名：(IIII)[I
+
+// static void callback(byte[] data, long timestamp, boolean compressed)
+// 参数：byte[] → [B, long → J, boolean → Z
+// 返回：void → V
+// 签名：([BJZ)V
+```
+
+**易混淆点：**
+- `long` 的签名是 `J`（不是 `L`，因为 `L` 被对象类型占了）
+- `boolean` 的签名是 `Z`（不是 `B`，因为 `B` 是 `byte`）
+- 数组类型是 `[` + 元素签名，如 `byte[]` → `[B`，`int[]` → `[I`
+- 对象类型**必须**以分号结尾：`Ljava/lang/String;`
+
+</details>
+
+### 题目 2：分析 Android_PushEvents 的线程安全性
+
+KrKr2 的 `Android_PushEvents` 使用 `compare_exchange_weak` 实现无锁队列。请回答：
+1. 为什么用 `compare_exchange_weak` 而不是 `compare_exchange_strong`？
+2. 如果把 `_lastQueuedEvents` 从 `std::atomic` 改成普通指针会怎样？
+
+<details>
+<summary>查看答案</summary>
+
+**1. weak vs strong：**
+
+`compare_exchange_weak` 可能在值匹配时仍然失败（称为"伪失败"，spurious failure），但它在某些 CPU 架构（如 ARM，即 Android 的主要架构）上比 `compare_exchange_strong` 更高效。因为 `Android_PushEvents` 已经在 `while` 循环中调用，伪失败只会导致多循环一次，不影响正确性。在高频调用（如每帧多次触摸事件）的场景下，选择 `weak` 版本可以减少 CPU 开销。
+
+**2. 如果不用 atomic：**
+
+去掉 `atomic` 后，多个 JNI 线程同时调用 `Android_PushEvents` 时会发生数据竞争（data race）：
+- 两个线程同时读取 `_lastQueuedEvents` 的值
+- 两个线程都把自己的 `node->prev` 指向同一个旧节点
+- 两个线程都把 `_lastQueuedEvents` 写为自己的节点
+- 结果：其中一个线程的节点丢失，对应的事件永远不会被执行
+
+这是典型的 ABA 问题的简化版。用 `std::atomic` + CAS 操作保证了"读取→比较→写入"是原子的，不会出现中间态。
+
+</details>
+
+### 题目 3：从 C++ 调用 Java Toast
+
+写一个 C++ 函数，通过 JNI 在 Android 屏幕上显示一个 Toast 消息。假设你已经有 `JavaVM* g_vm` 和一个工具函数 `JNIEnv* GetEnv()` 可用。
+
+<details>
+<summary>查看答案</summary>
+
+```cpp
+#include <jni.h>
+#include <string>
+
+// 假设 g_vm 和 GetEnv() 已经可用
+extern JavaVM *g_vm;
+JNIEnv *GetEnv();
+
+void showToast(const std::string &message) {
+    JNIEnv *env = GetEnv();
+    if (!env) return;
+
+    // 1. 查找 KR2Activity 类
+    jclass activityClass = env->FindClass("org/tvp/kirikiri2/KR2Activity");
+    if (!activityClass) return;
+
+    // 2. 获取 showToast 的方法 ID
+    //    假设 Java 侧有：public static void showToast(String msg)
+    jmethodID showToastMethod = env->GetStaticMethodID(
+        activityClass, "showToast", "(Ljava/lang/String;)V");
+    if (!showToastMethod) {
+        env->DeleteLocalRef(activityClass);
+        return;
+    }
+
+    // 3. 创建 Java String
+    jstring jmsg = env->NewStringUTF(message.c_str());
+
+    // 4. 调用 Java 方法
+    env->CallStaticVoidMethod(activityClass, showToastMethod, jmsg);
+
+    // 5. 释放本地引用
+    env->DeleteLocalRef(jmsg);
+    env->DeleteLocalRef(activityClass);
+}
+```
+
+**注意事项：**
+- Toast 必须在 UI 线程显示，所以 Java 侧的 `showToast` 方法内部需要 `runOnUiThread`
+- 如果从非 JNI 线程调用，需要先 `AttachCurrentThread` 获取有效的 `JNIEnv*`
+- 如果频繁调用，应该缓存 `jclass` 和 `jmethodID`（它们在类卸载前保持有效）
+
+</details>
+
+---
+
+## 下一步
+
+下一节将深入 JNI 的另一个核心难点——引用管理和字符串处理。你将学习本地引用、全局引用、弱全局引用的区别，以及如何安全地在 JNI 中处理字符串转换：
+
+→ [引用管理与字符串处理](./03-引用管理与字符串处理.md)
 

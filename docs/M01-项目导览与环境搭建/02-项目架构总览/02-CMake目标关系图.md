@@ -345,3 +345,103 @@ target_link_libraries(${PROJECT_NAME} PUBLIC krkr2core)
 
 - `core_utils_module`：线程、定时器、剪贴板、随机数等基础设施
 - `core_extension_module`：扩展接口实现（体量小，但在架构上承担可扩展入口）
+
+---
+
+## 动手实践
+
+### 实践 1：用 CMake 导出目标图
+
+在构建目录下执行以下命令，生成 Graphviz 格式的目标依赖图：
+
+```bash
+cmake --graphviz=targets.dot --preset="Linux Debug Config"
+# 或 Windows:
+cmake --graphviz=targets.dot --preset="Windows Debug Config"
+```
+
+然后用 Graphviz 工具渲染：
+
+```bash
+dot -Tpng targets.dot -o targets.png
+```
+
+打开 `targets.png`，对照本节描述的目标关系，验证 `krkr2` → `krkr2plugin` → `krkr2core` → 子模块的链路。
+
+### 实践 2：手动追踪一条链接链
+
+选择 `core_movie_module`，在 `cpp/core/movie/CMakeLists.txt` 中找到它的 `target_link_libraries`，记录它依赖了哪些三方库（FFmpeg 系列）。再到 `vcpkg.json` 中确认这些库是否被声明为依赖。
+
+---
+
+## 对照项目源码
+
+相关文件：
+- `CMakeLists.txt` 第 88-92 行：`target_link_libraries(krkr2 PUBLIC krkr2plugin krkr2core)` — 根级链接。
+- `cpp/core/CMakeLists.txt` 全文：INTERFACE 聚合所有子模块。
+- `cpp/plugins/CMakeLists.txt` 全文：STATIC 聚合所有插件。
+- `cpp/core/tjs2/CMakeLists.txt`：TJS2 模块的三方依赖声明。
+- `cpp/core/movie/CMakeLists.txt`：FFmpeg 相关依赖声明。
+- `cpp/core/visual/CMakeLists.txt`：图像解码库依赖声明。
+
+---
+
+## 常见错误
+
+### 错误 1：以为 PUBLIC/PRIVATE/INTERFACE 只是"风格选择"
+
+CMake 的链接可见性直接影响编译行为。`PUBLIC` 意味着链接关系和头文件路径会传播给上游目标；`PRIVATE` 只在当前目标内部可见。如果把本该是 `PUBLIC` 的依赖设为 `PRIVATE`，上游目标会在编译时找不到头文件。
+
+### 错误 2：修改子模块 CMakeLists 但忘记重新 configure
+
+CMake 的 `target_link_libraries` 是在 configure 阶段解析的。如果你修改了某个子模块的依赖关系，必须重新运行 `cmake --preset=...` 才能生效，仅执行 `cmake --build` 不会重新解析依赖图。
+
+### 错误 3：把 `krkr2core` 和 `krkr2plugin` 的依赖方向搞反
+
+`krkr2plugin` 依赖 `krkr2core`（插件层使用核心 API），而不是反过来。如果在核心层引入了对插件层的依赖，会造成循环依赖，CMake 可能不报错但链接行为不可预测。
+
+---
+
+## 本节小结
+
+- KrKr2 的 CMake 目标分三层：`krkr2`（可执行/SO）→ `krkr2plugin`（STATIC）→ `krkr2core`（INTERFACE）→ 9 个子模块（STATIC）。
+- INTERFACE 聚合是"对外统一、内部解耦"的成熟模式。
+- 核心子模块之间存在交叉依赖，不是简单的树状结构。
+- `PUBLIC`/`PRIVATE`/`INTERFACE` 可见性直接影响头文件传播和链接行为。
+
+---
+
+## 练习题与答案
+
+### 题目 1：为什么 `krkr2core` 用 INTERFACE 而不是 STATIC？
+
+<details>
+<summary>查看答案</summary>
+
+因为 `krkr2core` 本身不包含源文件，它的职责是把 9 个 STATIC 子模块聚合到一个统一入口。INTERFACE 库不生成 `.a`/`.lib` 文件，只传播链接关系和头文件路径。这样上游只需 `target_link_libraries(krkr2 PUBLIC krkr2core)` 就能获得所有核心模块。
+
+</details>
+
+### 题目 2：`tjs2` 模块依赖了哪些三方库？在哪里声明的？
+
+<details>
+<summary>查看答案</summary>
+
+`tjs2` 依赖 Boost::locale、fmt、spdlog、oniguruma。声明在 `cpp/core/tjs2/CMakeLists.txt` 的 `target_link_libraries` 中。这些库通过 vcpkg 管理，在 `vcpkg.json` 中有对应条目。
+
+</details>
+
+### 题目 3：如果在 `core_visual_module` 的 CMakeLists 中把 `libjpeg-turbo` 从 PUBLIC 改为 PRIVATE，会影响什么？
+
+<details>
+<summary>查看答案</summary>
+
+如果其他模块（如 `core_base_module`）的源码中 `#include` 了 libjpeg-turbo 的头文件，改为 PRIVATE 后这些模块将无法编译，因为头文件路径不再通过 `krkr2core` 传播。如果没有其他模块直接使用 libjpeg-turbo 的头文件，则改为 PRIVATE 是安全的，还能减少不必要的头文件暴露。
+
+</details>
+
+---
+
+## 下一步
+
+进入下一节：[`03-启动流程全链路.md`](./03-启动流程全链路.md)。你将把 CMake 目标图映射到运行时的实际执行流程，理解从 `main()` 到游戏画面出现的完整链路。

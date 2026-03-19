@@ -545,6 +545,90 @@ void CVideoPlayerVideo::CalcDropRequirement() {
 
 ---
 
+## 常见错误及解决方案
+
+### 错误 1：取消 #if 0 恢复功能时遗漏依赖的成员变量/类
+
+**现象**：将某个 `#if 0` 块改为 `#if 1` 试图恢复被裁剪的 Kodi 功能后，编译报大量 `undeclared identifier` 或 `incomplete type` 错误，涉及的符号散布在好几个文件里。
+
+**原因**：KrKr2 裁剪 Kodi 代码时，不仅用 `#if 0` 禁用了功能代码块，还同步删除或注释了该功能依赖的成员变量、辅助类、头文件包含。恢复代码块时只取消了 `#if 0`，但这些依赖已经不存在了。
+
+**解决**：恢复 `#if 0` 块之前，先做依赖扫描：
+
+```bash
+# 步骤 1：提取 #if 0 块中引用的所有标识符
+# Windows (PowerShell)
+$block = Get-Content CDVDVideoCodecFFmpeg.cpp -Raw
+# 手动定位 #if 0 块，列出其中用到的类名/变量名
+
+# 步骤 2：在整个 movie/ffmpeg/ 目录搜索这些标识符
+grep -rn "CDVDVideoCodecDRMPRIME" cpp/core/movie/ffmpeg/
+# 如果搜不到定义 → 说明该类已被整个删除，需要从原版 Kodi 回搬
+
+# 步骤 3：从原版 Kodi 对应版本的源码中找到缺失的定义
+# 参考 Kodi v19 (Matrix) 的 xbmc/cores/VideoPlayer/ 目录
+```
+
+> 💡 建议用 `git diff` 对比 KrKr2 版本与原版 Kodi 对应文件，可以快速看到所有被删除的内容。
+
+### 错误 2：使用已弃用的 FFmpeg API 导致新版 FFmpeg 编译失败
+
+**现象**：升级 FFmpeg 版本（如从 4.x 到 5.x/6.x）后编译报错：`'av_init_packet' is deprecated`、`'avcodec_decode_video2' undeclared` 等。
+
+**原因**：KrKr2 保留的 Kodi 遗产代码中仍在使用 FFmpeg 4.x 时代的旧 API。这些 API 在 FFmpeg 5.0+ 中被标记为 deprecated，在 6.0+ 中被直接移除：
+
+| 旧 API（已弃用） | 新 API（替代） | 变更版本 |
+|------------------|----------------|----------|
+| `av_init_packet(&pkt)` | 栈上零初始化 `AVPacket pkt = {}` 或 `av_packet_alloc()` | FFmpeg 4.4 deprecated, 6.0 removed |
+| `avcodec_decode_video2()` | `avcodec_send_packet()` + `avcodec_receive_frame()` | FFmpeg 3.1 deprecated, 5.0 removed |
+| `avpicture_fill()` | `av_image_fill_arrays()` | FFmpeg 3.4 deprecated |
+
+**解决**：逐一替换弃用调用。以 `av_init_packet` 为例：
+
+```cpp
+// ❌ 旧写法（FFmpeg 6.0 编译失败）
+AVPacket pkt;
+av_init_packet(&pkt);
+pkt.data = nullptr;
+pkt.size = 0;
+
+// ✅ 新写法（兼容 FFmpeg 4.x-7.x）
+AVPacket* pkt = av_packet_alloc();
+if (!pkt) { /* 内存分配失败处理 */ }
+// 使用完毕后：
+av_packet_free(&pkt);
+```
+
+### 错误 3：硬编码 GetFPS()=60 导致在非标准刷新率下同步异常
+
+**现象**：在 75Hz/120Hz/144Hz 显示器上播放视频，画面出现周期性的微卡顿（judder），但在 60Hz 显示器上完全正常。
+
+**原因**：KrKr2 中 `CRenderManager::GetFPS()` 被简化为直接返回 `60.0`（硬编码），而原版 Kodi 会查询显示器实际刷新率。当显示器是 144Hz 时，渲染器以为刷新率是 60Hz，`VSYNC` 时序计算全部错误，导致每隔几帧就多等或少等一个刷新周期。
+
+**解决**：
+
+```cpp
+// ❌ KrKr2 当前的硬编码实现
+double CRenderManager::GetFPS() {
+    return 60.0;  // 永远返回 60，不管实际显示器
+}
+
+// ✅ 修复：查询 Cocos2d-x 的实际帧率设置
+double CRenderManager::GetFPS() {
+    // Cocos2d-x Director 记录了当前的动画间隔
+    float interval = cocos2d::Director::getInstance()
+                         ->getAnimationInterval();
+    if (interval > 0.0f) {
+        return 1.0 / interval;  // 如 interval=1/60 → 返回 60
+    }
+    return 60.0;  // fallback
+}
+```
+
+> ⚠️ 即使修复了 `GetFPS()`，还需要检查 `FlipPage()` 和 `WaitForBuffer()` 中是否有基于 60fps 假设的硬编码等待时间（如 `sleep(16ms)`）。
+
+---
+
 ## 动手实践
 
 ### 实践 1：#if 0 块统计

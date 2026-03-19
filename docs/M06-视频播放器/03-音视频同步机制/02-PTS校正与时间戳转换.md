@@ -573,6 +573,90 @@ graph TD
     I --> J[帧进入渲染队列]
 ```
 
+## 常见错误及解决方案
+
+### 错误 1：ConvertTimestamp 中 num/den 参数颠倒导致时间戳错误
+
+**现象**：视频播放速度异常——如果原始时间基（time_base）是 `1/90000`，颠倒后变成 `90000/1`，时间戳被放大 `90000²` 倍，画面要么闪退要么完全卡死。
+
+**原因**：`ConvertTimestamp()` 内部调用 `av_rescale_q()` 进行时间基转换，参数顺序为 `av_rescale_q(pts, src_time_base, dst_time_base)`。如果把 `num`（分子）和 `den`（分母）写反了，比如把 `{1, 90000}` 写成 `{90000, 1}`，时间戳值会偏差 81 亿倍。
+
+**解决**：
+
+```cpp
+// ❌ 错误：num 和 den 颠倒
+AVRational src_tb = {stream->time_base.den, stream->time_base.num}; // 反了！
+
+// ✅ 正确：直接使用 stream 的 time_base
+AVRational src_tb = stream->time_base; // {num=1, den=90000}
+
+// 转换到 DVD_TIME_BASE（即微秒级时间基 {1, 1000000}）
+int64_t converted = av_rescale_q(pts, src_tb, AV_TIME_BASE_Q);
+```
+
+> 💡 **调试技巧**：在 `ConvertTimestamp` 入口打印 `src_tb.num` 和 `src_tb.den`，确认 `num < den`（对于视频流几乎总是如此）。
+
+### 错误 2：ErrorAdjust 阈值设置不当导致频繁时钟跳变（画面抖动）
+
+**现象**：播放过程中画面周期性地轻微卡顿或抖动，日志中可以看到时钟频繁被"校正"（ErrorAdjust 反复触发），每秒触发几十次。
+
+**原因**：`ErrorAdjust`（误差校正）的触发阈值设得太小。比如阈值设为 `1ms`，而正常的解码抖动就有 `2-5ms`，导致每一帧都触发时钟校正。每次校正都会造成一个微小的时间跳变，视觉上表现为画面抖动。
+
+**解决**：设置合理的死区（dead zone），只有偏差超过一定阈值才触发校正：
+
+```cpp
+// 时钟校正的合理配置
+const double kErrorThreshold = 0.020;  // 20ms — 低于此值的误差不校正
+const double kMaxError = 0.200;        // 200ms — 超过此值认为是 seek/跳转，不渐进校正
+
+void ApplyErrorAdjust(double error) {
+    double absError = std::abs(error);
+
+    if (absError < kErrorThreshold) {
+        // 死区内：误差太小，不值得校正，忽略
+        return;
+    }
+
+    if (absError > kMaxError) {
+        // 误差过大：可能是 seek 后的首帧，直接硬同步
+        ForceSyncClock();
+        return;
+    }
+
+    // 正常范围：使用渐进式校正（SYNC_RESAMPLE）
+    GradualAdjust(error);
+}
+```
+
+### 错误 3：SYNC_RESAMPLE 模式下大偏差收敛极慢，未及时切换到 SYNC_DISCON
+
+**现象**：seek 之后音画不同步持续好几秒才恢复，用户体验很差。日志显示偏差从 `500ms` 缓慢递减到 `0`，耗时 `3-5` 秒。
+
+**原因**：`SYNC_RESAMPLE`（重采样同步）通过微调音频采样率来渐进式消除偏差，适合小偏差（<50ms）。但 seek 后偏差通常在 `200ms-1s` 级别，靠每帧微调 `0.1%` 的采样率来追赶，收敛速度远远不够。应该在大偏差时切换到 `SYNC_DISCON`（断续同步，直接跳到正确位置）。
+
+**解决**：
+
+```cpp
+enum SyncMode { SYNC_DISCON, SYNC_RESAMPLE, SYNC_SKIPDUP };
+
+SyncMode ChooseSyncMode(double currentError) {
+    // > 80ms：偏差太大，直接跳（丢帧/插帧）
+    if (std::abs(currentError) > 0.080) {
+        return SYNC_DISCON;
+    }
+    // 20ms-80ms：用重采样渐进追赶
+    if (std::abs(currentError) > 0.020) {
+        return SYNC_RESAMPLE;
+    }
+    // < 20ms：已同步，不需要任何校正
+    return SYNC_SKIPDUP;  // 维持当前状态
+}
+```
+
+> ⚠️ 实际项目中 `CDVDPlayerAudio::HandleSyncError()` 就实现了类似逻辑——当偏差超过 `DVD_MSEC_TO_TIME(80)` 时切换到 `SYNC_DISCON`。修改阈值时要同时调整音频端和视频端，否则两端策略不一致会互相打架。
+
+---
+
 ## 动手实践
 
 ### 实验：完整的时间戳转换与同步模拟

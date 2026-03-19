@@ -663,6 +663,82 @@ int64_t CurrentHostFrequency() {
 
 > ⚠️ **常见错误 2**：在 Linux 上使用 `CLOCK_REALTIME` 而非 `CLOCK_MONOTONIC`。`CLOCK_REALTIME` 会被 NTP 调整，可能导致时钟倒退。音视频同步必须使用单调递增时钟。
 
+## 常见错误及解决方案
+
+### 错误 1：速度切换时忘记调整 m_startClock 导致时钟跳变
+
+**现象**：用户按快进/慢放切换倍速后，画面瞬间跳到未来或过去的位置，音画严重不同步，几秒后才恢复正常。
+
+**原因**：`SetSpeed()` 改变了 `m_speedAfterRestore`（播放速率），但没有同步重新计算 `m_startClock`（时钟起始参考点）。`GetClock()` 的计算公式是 `(系统时间 - m_startClock) × 速率 + m_ClockOffset`，如果速率从 1.0 变为 2.0 但 `m_startClock` 不变，在速率切换瞬间累积时间被乘以新速率，产生一个巨大的跳变值。
+
+**解决**：在修改速率之前，先用当前速率"结算"已经过去的时间，更新 `m_ClockOffset`，再将 `m_startClock` 重置为当前系统时间：
+
+```cpp
+// 正确的速率切换流程
+void CDVDClock::SetSpeed(int iSpeed) {
+    std::unique_lock<std::mutex> lock(m_critSection);
+
+    // 1. 先用旧速率结算当前时钟值，存入 offset
+    double currentClock = SystemToAbsolute(GetAbsoluteTime());
+    m_ClockOffset = currentClock;
+
+    // 2. 重置起始时间为"现在"
+    m_startClock = GetAbsoluteTime();
+
+    // 3. 再更新速率
+    m_speedAfterRestore = iSpeed;
+}
+```
+
+### 错误 2：暂停恢复时 m_pauseClock 未清零导致时间冻结
+
+**现象**：暂停后恢复播放，画面不动了（像还在暂停），但音频正常播放。日志显示 `GetClock()` 返回值始终不变。
+
+**原因**：暂停时 `Pause()` 会记录暂停时刻到 `m_pauseClock`。恢复时 `Resume()` 应当计算暂停持续时间并补偿到 `m_startClock`，然后将 `m_pauseClock` 清零。如果忘记清零，`GetClock()` 内部检测到 `m_pauseClock != 0` 就一直返回暂停时刻的值。
+
+**解决**：
+
+```cpp
+void CDVDClock::Resume() {
+    std::unique_lock<std::mutex> lock(m_critSection);
+
+    // 计算暂停持续了多久
+    double pauseDuration = GetAbsoluteTime() - m_pauseClock;
+
+    // 把暂停时长补偿到起始时间，这样恢复后时钟衔接自然
+    m_startClock += pauseDuration;
+
+    // 【关键】必须清零，否则 GetClock() 以为仍在暂停
+    m_pauseClock = 0.0;
+}
+```
+
+### 错误 3：SpeedAdjust 值过大导致音画持续漂移
+
+**现象**：播放一段时间后，音频和视频逐渐不同步，偏差随时间线性增长，从几十毫秒扩大到几百毫秒。
+
+**原因**：`SpeedAdjust`（精细速率微调）用于补偿音频采样率与视频帧率之间的微小差异，典型值应该在 `1.0 ± 0.005` 范围内（即 ±0.5%）。如果设成 `1.05`（5%），每分钟会累积 3 秒的偏差。常见原因是调试时手动设了一个大值忘了改回来，或者自动调整算法没有设上限。
+
+**解决**：给 `SpeedAdjust` 加上安全阈值钳位（clamp），并添加越界日志：
+
+```cpp
+void CDVDClock::SetSpeedAdjust(double adjust) {
+    // 安全阈值：正常微调绝不应超过 ±1%
+    const double kMaxAdjust = 0.01;
+
+    if (std::abs(adjust - 1.0) > kMaxAdjust) {
+        // 记录告警日志，方便排查
+        spdlog::warn("SpeedAdjust 异常: {:.4f}，钳位到 [{:.4f}, {:.4f}]",
+                     adjust, 1.0 - kMaxAdjust, 1.0 + kMaxAdjust);
+        adjust = std::clamp(adjust, 1.0 - kMaxAdjust, 1.0 + kMaxAdjust);
+    }
+
+    m_speedAdjust = adjust;
+}
+```
+
+---
+
 ## 动手实践
 
 ### 实验 1：模拟完整的时钟生命周期

@@ -652,6 +652,88 @@ add_executable(player simple_al_player.cpp)
 target_link_libraries(player PRIVATE OpenAL::OpenAL)
 ```
 
+## 常见错误及解决方案
+
+### 错误 1：OpenAL Source 状态查询与缓冲区填充不同步
+
+**现象**：播放过程中偶尔出现短暂静音或爆音，调试发现 `alSourceUnqueueBuffers` 返回 `AL_INVALID_OPERATION`。
+
+**原因**：在 Source 处于 `AL_PLAYING` 状态时，尝试 Unqueue 尚未播放完毕的 Buffer。`alSourceUnqueueBuffers` 只能取回已经播放完成的 Buffer，但代码没有先查询 `AL_BUFFERS_PROCESSED` 来确认有多少 Buffer 可以取回。
+
+**解决**：
+
+```cpp
+// 错误写法：直接 Unqueue 全部 Buffer
+alSourceUnqueueBuffers(source, NUM_BUFFERS, bufferIds);
+// 可能触发 AL_INVALID_OPERATION，因为部分 Buffer 还在播放中
+
+// 正确写法：先查询已处理数量，再逐个取回
+ALint processed = 0;
+alGetSourcei(source, AL_BUFFERS_PROCESSED, &processed);
+while (processed > 0) {
+    ALuint buf;
+    alSourceUnqueueBuffers(source, 1, &buf);
+    // 重新填充 buf 并 Queue 回去
+    fillBuffer(buf);
+    alSourceQueueBuffers(source, 1, &buf);
+    processed--;
+}
+```
+
+> 这正是项目中 `tTVPSoundBufferAL::AppendBuffer()`（`WaveMixer.cpp` 第 560-590 行）采用的策略：先用 `alGetSourcei(AL_BUFFERS_PROCESSED)` 查询，再安全 Unqueue。
+
+### 错误 2：OpenAL 设备 / 上下文泄漏导致后续音频功能失效
+
+**现象**：应用退出后重新启动，OpenAL 报 `ALC_INVALID_DEVICE` 或系统音频服务被占用。在 Android 上表现为第二次进入游戏时完全无声。
+
+**原因**：`alcCloseDevice` / `alcDestroyContext` 调用顺序错误，或在 Context 仍为 Current 时直接关闭 Device。OpenAL 规范要求：先取消当前 Context → 销毁 Context → 关闭 Device。
+
+**解决**：
+
+```cpp
+// 错误顺序：
+alcCloseDevice(device);      // Context 还在引用 Device！
+alcDestroyContext(context);   // 为时已晚
+
+// 正确顺序：
+alcMakeContextCurrent(nullptr);   // 1. 取消当前 Context
+alcDestroyContext(context);        // 2. 销毁 Context
+alcCloseDevice(device);            // 3. 关闭 Device
+context = nullptr;
+device = nullptr;
+```
+
+> 项目中 `tTVPAudioRendererAL` 析构函数（`WaveMixer.cpp` 第 730-750 行）严格按此顺序执行清理。
+
+### 错误 3：NUM_BUFFERS 设置过小导致 Source 饥饿停止
+
+**现象**：CPU 负载较高时播放频繁卡顿，日志中可见 Source 状态从 `AL_PLAYING` 自动变为 `AL_STOPPED`，需要手动调用 `alSourcePlay` 重启。
+
+**原因**：流式播放使用的 Buffer 队列数量不足（如仅 2 个），解码线程稍有延迟就导致所有 Buffer 都被播放完毕，OpenAL 自动将 Source 停止（这是 OpenAL 规范行为——当队列中所有 Buffer 都已处理且没有新 Buffer 入队时，Source 进入 STOPPED 状态）。
+
+**解决**：
+
+```cpp
+// 项目默认值（WaveMixer.cpp 第 489 行）
+static const int NUM_BUFFERS = 4;   // 4 个缓冲区轮转
+
+// 如果在低端设备上仍然卡顿，可适当增加：
+static const int NUM_BUFFERS = 6;   // 给解码线程更多缓冲余量
+
+// 同时需要检测并恢复 Source 饥饿：
+ALint state;
+alGetSourcei(source, AL_SOURCE_STATE, &state);
+if (state == AL_STOPPED && !userRequestedStop) {
+    // Source 因缓冲区饥饿而停止，重新启动
+    alSourcePlay(source);
+    printf("警告: Source 饥饿停止，已自动重启\n");
+}
+```
+
+> 项目的 `tTVPSoundBufferAL::AppendBuffer()` 末尾（`WaveMixer.cpp` 第 588-590 行）正是通过检测 `AL_STOPPED` 状态来自动恢复播放。
+
+---
+
 ## 对照项目源码
 
 ### 核心文件

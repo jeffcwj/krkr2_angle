@@ -644,6 +644,133 @@ void InitPCMConversion() {
 
 ---
 
+## 常见错误及解决方案
+
+### 错误 1：Float32→Int16 转换时未做饱和截断导致爆音
+
+**现象**：播放高动态范围（HDR）音频或某些音效时，输出中出现剧烈的数字爆音和撕裂声。
+
+**原因**：浮点 PCM 的合法范围是 [-1.0, 1.0]，但实际数据可能超出此范围（如音频处理后产生的过冲）。直接用 `(int16_t)(sample * 32768.0f)` 转换，当 sample > 1.0 时乘积超过 32767，强制类型转换产生未定义行为（wrap-around），导致信号反转为负值。
+
+**解决**：
+
+```cpp
+// 错误：无饱和截断
+void ConvertFloat32ToInt16_WRONG(int16_t *dst, const float *src, 
+                                  size_t samples) {
+    for (size_t i = 0; i < samples; i++) {
+        dst[i] = (int16_t)(src[i] * 32768.0f);  // src[i] > 1.0 时溢出！
+    }
+}
+
+// 正确：先钳位再转换
+void ConvertFloat32ToInt16(int16_t *dst, const float *src, 
+                           size_t samples) {
+    for (size_t i = 0; i < samples; i++) {
+        // 钳位到 [-1.0, 1.0]
+        float clamped = src[i];
+        if (clamped > 1.0f)  clamped = 1.0f;
+        if (clamped < -1.0f) clamped = -1.0f;
+        
+        // 转换（注意：用 32767 而非 32768 避免正向溢出）
+        dst[i] = (int16_t)(clamped * 32767.0f);
+    }
+}
+
+// SIMD 加速版本（SSE2）
+#include <immintrin.h>
+void ConvertFloat32ToInt16_SSE(int16_t *dst, const float *src, 
+                               size_t samples) {
+    const __m128 scale = _mm_set1_ps(32767.0f);
+    const __m128 clamp_max = _mm_set1_ps(1.0f);
+    const __m128 clamp_min = _mm_set1_ps(-1.0f);
+    
+    size_t i = 0;
+    for (; i + 4 <= samples; i += 4) {
+        __m128 v = _mm_loadu_ps(&src[i]);
+        v = _mm_min_ps(v, clamp_max);       // 上限钳位
+        v = _mm_max_ps(v, clamp_min);       // 下限钳位
+        v = _mm_mul_ps(v, scale);           // 缩放
+        __m128i vi = _mm_cvtps_epi32(v);    // 转为 32 位整数
+        vi = _mm_packs_epi32(vi, vi);       // 饱和压缩到 16 位
+        _mm_storel_epi64((__m128i *)&dst[i], vi);
+    }
+    // 处理剩余不足 4 个的采样
+    for (; i < samples; i++) {
+        float c = src[i] < -1.0f ? -1.0f : (src[i] > 1.0f ? 1.0f : src[i]);
+        dst[i] = (int16_t)(c * 32767.0f);
+    }
+}
+```
+
+> 项目的 `PCMConvertLoopFloat32ToInt16_sse`（通过 `InitPCMConversion` 选择）正是这种 SIMD 饱和转换模式。
+
+### 错误 2：24 位 PCM 组装时字节序处理错误
+
+**现象**：播放 24 位 WAV 文件时听到的是纯噪音，但文件在其他播放器中正常。
+
+**原因**：24 位 PCM 存储为 3 个字节，小端序（Little-Endian，WAV 标准格式）的排列是 `[低字节, 中字节, 高字节]`。组装为 32 位整数时如果字节顺序搞反，或者忘记符号扩展，结果完全错误。
+
+**解决**：
+
+```cpp
+// 错误 A：字节顺序搞反（当作大端序处理了）
+int32_t sample = (input[0] << 16) | (input[1] << 8) | input[2];
+
+// 错误 B：字节顺序正确但忘记符号扩展
+int32_t sample = input[0] | (input[1] << 8) | (input[2] << 16);
+// 当 input[2] 的最高位为 1 时（负数），sample 仍为正值
+
+// 正确：小端序组装 + 符号扩展
+int32_t sample = input[0] | (input[1] << 8) | (input[2] << 16);
+// 符号扩展：如果第 23 位（最高有效位）为 1，则高 8 位全填 1
+if (sample & 0x800000) {
+    sample |= 0xFF000000;  // 负数：高位填 1
+}
+
+// 更简洁的写法：利用算术右移实现符号扩展
+int32_t sample = ((int32_t)(input[0] | (input[1] << 8) | 
+                  (input[2] << 16)) << 8) >> 8;
+// 先左移 8 位让符号位到 bit31，再算术右移 8 位恢复
+```
+
+### 错误 3：多声道 PCM 交错顺序假设错误导致声道错位
+
+**现象**：5.1 声道音频播放时，中置声道的对话声从左扬声器出来，低音炮内容从右扬声器出来。
+
+**原因**：WAV 文件的多声道交错顺序遵循 Microsoft 定义的声道掩码（channel mask），标准 5.1 顺序是 `FL, FR, FC, LFE, BL, BR`。如果代码假设顺序为 `FL, FC, FR, LFE, BL, BR`（某些其他格式的排列），声道映射就会出错。
+
+**解决**：
+
+```cpp
+// WAV 标准 5.1 声道顺序（WAVEFORMATEXTENSIBLE channelMask）
+// 0x3F = SPEAKER_FRONT_LEFT | SPEAKER_FRONT_RIGHT | 
+//        SPEAKER_FRONT_CENTER | SPEAKER_LOW_FREQUENCY |
+//        SPEAKER_BACK_LEFT | SPEAKER_BACK_RIGHT
+enum WavChannel {
+    FL = 0,   // Front Left（前左）
+    FR = 1,   // Front Right（前右）
+    FC = 2,   // Front Center（中置）
+    LFE = 3,  // Low Frequency Effects（低音炮）
+    BL = 4,   // Back Left（后左）
+    BR = 5    // Back Right（后右）
+};
+
+// 如果目标设备使用不同的声道顺序，需要做重映射：
+void RemapChannels(int16_t *dst, const int16_t *src, 
+                   size_t frames, int srcOrder[], int channels) {
+    for (size_t f = 0; f < frames; f++) {
+        for (int ch = 0; ch < channels; ch++) {
+            dst[f * channels + ch] = src[f * channels + srcOrder[ch]];
+        }
+    }
+}
+```
+
+> KrKr2 主要处理立体声（2 声道）音频，但 FFmpeg 解码器可能输出多声道。项目通过 SwrContext 将任意声道布局转为立体声后再送入混音器。
+
+---
+
 ## 动手实践
 
 ### 实践 1：实现 24 位浮点转换

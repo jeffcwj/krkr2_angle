@@ -657,6 +657,156 @@ static void TVPConvertFloatPCMTo16bits(
 
 ---
 
+## 动手实践
+
+### 实验 1：实现一个正弦波生成解码器
+
+不需要真正的音频文件——实现一个 `tTVPWaveDecoder` 子类，在 `Render()` 中生成指定频率的正弦波 PCM 数据。这能帮你理解接口的每个方法如何配合工作。
+
+```cpp
+#include <cmath>
+#include <cstdint>
+#include <cstring>
+#include <iostream>
+#include <vector>
+
+// 模拟 tTVPWaveDecoder 接口
+struct tTVPWaveFormat {
+    int SamplesPerSec;    // 采样率
+    int Channels;         // 声道数
+    int BitsPerSample;    // 每样本位数
+    int BytesPerSample;   // = BitsPerSample / 8
+    int TotalSamples;     // 总样本数（-1 表示未知/流式）
+    int TotalTime;        // 总时间（毫秒）
+    bool IsFloat;         // 是否浮点格式
+};
+
+class SineWaveDecoder {
+    tTVPWaveFormat format_;
+    double frequency_;      // 生成的正弦波频率（Hz）
+    int64_t position_;      // 当前读取位置（样本数）
+
+public:
+    SineWaveDecoder(double freq, int sampleRate = 44100, int durationMs = 3000)
+        : frequency_(freq), position_(0) {
+        format_.SamplesPerSec = sampleRate;
+        format_.Channels = 1;          // 单声道
+        format_.BitsPerSample = 16;    // 16 位整数 PCM
+        format_.BytesPerSample = 2;
+        format_.IsFloat = false;
+        format_.TotalSamples = sampleRate * durationMs / 1000;
+        format_.TotalTime = durationMs;
+    }
+
+    // 获取音频格式信息
+    void GetFormat(tTVPWaveFormat& fmt) const {
+        fmt = format_;
+    }
+
+    // 渲染 PCM 数据到缓冲区
+    // 返回实际渲染的样本数
+    int Render(void* buf, int bufsamplelen) {
+        auto* out = static_cast<int16_t*>(buf);
+        int samplesToRender = bufsamplelen;
+
+        // 不超过总样本数
+        if (position_ + samplesToRender > format_.TotalSamples) {
+            samplesToRender = static_cast<int>(
+                format_.TotalSamples - position_);
+        }
+        if (samplesToRender <= 0) return 0;
+
+        // 生成正弦波
+        const double twoPiF = 2.0 * M_PI * frequency_;
+        for (int i = 0; i < samplesToRender; i++) {
+            double t = static_cast<double>(position_ + i)
+                       / format_.SamplesPerSec;
+            double sample = std::sin(twoPiF * t);
+            // 缩放到 int16_t 范围 [-32767, 32767]
+            out[i] = static_cast<int16_t>(sample * 32767.0);
+        }
+
+        position_ += samplesToRender;
+        return samplesToRender;
+    }
+
+    // 定位到指定样本位置
+    bool SetPosition(int64_t samplePos) {
+        if (samplePos < 0 || samplePos > format_.TotalSamples) {
+            return false;
+        }
+        position_ = samplePos;
+        return true;
+    }
+};
+
+int main() {
+    // 创建 440Hz (标准 A 音) 的正弦波，3 秒
+    SineWaveDecoder decoder(440.0, 44100, 3000);
+
+    tTVPWaveFormat fmt;
+    decoder.GetFormat(fmt);
+    std::cout << "采样率: " << fmt.SamplesPerSec << " Hz\n";
+    std::cout << "总样本: " << fmt.TotalSamples << "\n";
+    std::cout << "时长: " << fmt.TotalTime << " ms\n";
+
+    // 分块读取，每次 1024 样本
+    std::vector<int16_t> buffer(1024);
+    int totalRendered = 0;
+
+    while (true) {
+        int rendered = decoder.Render(buffer.data(), 1024);
+        if (rendered == 0) break;  // 文件结束
+        totalRendered += rendered;
+    }
+
+    std::cout << "共渲染: " << totalRendered << " 样本\n";
+
+    // 测试 Seek：定位到中间位置
+    decoder.SetPosition(fmt.TotalSamples / 2);
+    int afterSeek = decoder.Render(buffer.data(), 1024);
+    std::cout << "Seek 后渲染: " << afterSeek << " 样本\n";
+
+    return 0;
+}
+```
+
+**预期输出**：
+```
+采样率: 44100 Hz
+总样本: 132300
+时长: 3000 ms
+共渲染: 132300 样本
+Seek 后渲染: 1024 样本
+```
+
+### 实验 2：验证 Render 的边界行为
+
+测试解码器在以下边界条件下的行为是否正确：
+
+```cpp
+// 测试 1：请求 0 样本 — 应返回 0
+int result = decoder.Render(buffer.data(), 0);
+assert(result == 0);
+
+// 测试 2：在文件末尾请求超出剩余量的样本
+decoder.SetPosition(fmt.TotalSamples - 10);  // 只剩 10 样本
+result = decoder.Render(buffer.data(), 1024);  // 请求 1024
+assert(result == 10);  // 只返回剩余的 10 个
+
+// 测试 3：已到末尾再次读取 — 应返回 0
+result = decoder.Render(buffer.data(), 1024);
+assert(result == 0);
+
+// 测试 4：Seek 到非法位置 — 应返回 false
+assert(decoder.SetPosition(-1) == false);
+assert(decoder.SetPosition(fmt.TotalSamples + 1) == false);
+
+std::cout << "所有边界测试通过！\n";
+```
+
+---
+
 ## 常见错误与排查
 
 ### 错误 1：渲染数据对齐问题

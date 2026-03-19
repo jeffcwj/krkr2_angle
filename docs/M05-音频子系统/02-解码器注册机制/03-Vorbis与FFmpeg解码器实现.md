@@ -716,6 +716,259 @@ int FFWaveDecoder::audio_decode_frame() {
 
 ---
 
+## 动手实践
+
+### 实验 1：用 libvorbisfile 解码 OGG 文件并输出 PCM
+
+编写一个最小化 OGG 解码程序，体验回调机制的完整流程：
+
+```cpp
+// vorbis_decode_demo.cpp
+// 演示：使用 libvorbisfile 将 OGG 文件解码为原始 PCM 数据
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <vorbis/vorbisfile.h>
+
+int main(int argc, char *argv[]) {
+    if (argc < 3) {
+        printf("用法: %s <input.ogg> <output.raw>\n", argv[0]);
+        return 1;
+    }
+
+    // 1. 打开 OGG 文件
+    FILE *fin = fopen(argv[1], "rb");
+    if (!fin) {
+        printf("无法打开输入文件: %s\n", argv[1]);
+        return 1;
+    }
+
+    // 2. 初始化 libvorbisfile（使用默认 FILE* 回调）
+    OggVorbis_File vf;
+    int ret = ov_open_callbacks(fin, &vf, nullptr, 0, OV_CALLBACKS_DEFAULT);
+    if (ret != 0) {
+        printf("ov_open_callbacks 失败，错误码: %d\n", ret);
+        // 注意：ov_open_callbacks 失败时不会关闭 fin
+        fclose(fin);
+        return 1;
+    }
+
+    // 3. 读取音频信息
+    vorbis_info *info = ov_info(&vf, -1);
+    printf("采样率: %ld Hz\n", info->rate);
+    printf("声道数: %d\n", info->channels);
+    printf("总采样数: %lld\n", (long long)ov_pcm_total(&vf, -1));
+    printf("时长: %.2f 秒\n", ov_time_total(&vf, -1));
+
+    // 4. 解码所有 PCM 数据
+    FILE *fout = fopen(argv[2], "wb");
+    char buffer[4096];          // 解码输出缓冲区
+    int current_section = 0;    // 当前逻辑流段号
+    long total_bytes = 0;
+    int eof = 0;
+
+    while (!eof) {
+        // ov_read 参数：
+        //   buffer: 输出缓冲区
+        //   4096: 缓冲区大小（字节）
+        //   0: 小端序（0=little-endian, 1=big-endian）
+        //   2: 每采样 2 字节（16 位）
+        //   1: 有符号（1=signed, 0=unsigned）
+        //   &current_section: 输出当前流段号
+        long bytes_read = ov_read(&vf, buffer, sizeof(buffer),
+                                  0, 2, 1, &current_section);
+        if (bytes_read < 0) {
+            printf("解码错误: %ld\n", bytes_read);
+            // OV_EBADLINK(-137): 损坏的链接
+            // OV_EINVAL(-131): 无效参数
+            continue;   // 可选择跳过错误帧继续解码
+        } else if (bytes_read == 0) {
+            eof = 1;    // 文件结束
+        } else {
+            fwrite(buffer, 1, bytes_read, fout);
+            total_bytes += bytes_read;
+        }
+    }
+
+    printf("解码完成，输出 %ld 字节 PCM 数据\n", total_bytes);
+
+    // 5. 清理（ov_clear 会自动关闭 fin）
+    fclose(fout);
+    ov_clear(&vf);
+    return 0;
+}
+```
+
+**编译与运行：**
+
+```bash
+# Linux / macOS
+g++ -std=c++17 vorbis_decode_demo.cpp -o vorbis_demo -lvorbisfile -lvorbis -logg
+
+# Windows (vcpkg)
+# 确保 vcpkg 已安装 libvorbis: vcpkg install libvorbis
+g++ -std=c++17 vorbis_decode_demo.cpp -o vorbis_demo.exe -lvorbisfile -lvorbis -logg
+
+./vorbis_demo test.ogg output.raw
+```
+
+**预期输出：**
+
+```
+采样率: 44100 Hz
+声道数: 2
+总采样数: 220500
+时长: 5.00 秒
+解码完成，输出 882000 字节 PCM 数据
+```
+
+### 实验 2：用 FFmpeg API 解码任意音频文件
+
+体验 FFmpeg 的解复用→解码→格式转换完整流程：
+
+```cpp
+// ffmpeg_decode_demo.cpp
+// 演示：使用 FFmpeg 解码任意格式音频为 S16LE PCM
+extern "C" {
+#include <libavformat/avformat.h>
+#include <libavcodec/avcodec.h>
+#include <libswresample/swresample.h>
+}
+#include <cstdio>
+
+int main(int argc, char *argv[]) {
+    if (argc < 3) {
+        printf("用法: %s <input_audio> <output.raw>\n", argv[0]);
+        return 1;
+    }
+
+    // 1. 打开输入文件（解复用器）
+    AVFormatContext *fmt_ctx = nullptr;
+    if (avformat_open_input(&fmt_ctx, argv[1], nullptr, nullptr) < 0) {
+        printf("无法打开文件: %s\n", argv[1]);
+        return 1;
+    }
+
+    // 2. 查找音频流
+    if (avformat_find_stream_info(fmt_ctx, nullptr) < 0) {
+        printf("无法获取流信息\n");
+        avformat_close_input(&fmt_ctx);
+        return 1;
+    }
+
+    int audio_idx = -1;
+    for (unsigned i = 0; i < fmt_ctx->nb_streams; i++) {
+        if (fmt_ctx->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_AUDIO) {
+            audio_idx = i;
+            break;
+        }
+    }
+
+    if (audio_idx < 0) {
+        printf("未找到音频流\n");
+        avformat_close_input(&fmt_ctx);
+        return 1;
+    }
+
+    // 3. 创建解码器上下文
+    AVCodecParameters *par = fmt_ctx->streams[audio_idx]->codecpar;
+    const AVCodec *codec = avcodec_find_decoder(par->codec_id);
+    AVCodecContext *dec_ctx = avcodec_alloc_context3(codec);
+    avcodec_parameters_to_context(dec_ctx, par);
+    avcodec_open2(dec_ctx, codec, nullptr);
+
+    printf("编解码器: %s\n", codec->long_name);
+    printf("采样率: %d Hz, 声道数: %d\n",
+           dec_ctx->sample_rate, dec_ctx->ch_layout.nb_channels);
+    printf("采样格式: %s (planar=%d)\n",
+           av_get_sample_fmt_name(dec_ctx->sample_fmt),
+           av_sample_fmt_is_planar(dec_ctx->sample_fmt));
+
+    // 4. 创建重采样器（将任意格式转为 S16 交错格式）
+    SwrContext *swr = nullptr;
+    AVChannelLayout out_layout;
+    av_channel_layout_default(&out_layout, dec_ctx->ch_layout.nb_channels);
+
+    swr_alloc_set_opts2(&swr,
+        &out_layout, AV_SAMPLE_FMT_S16, dec_ctx->sample_rate,  // 输出
+        &dec_ctx->ch_layout, dec_ctx->sample_fmt, dec_ctx->sample_rate,  // 输入
+        0, nullptr);
+    swr_init(swr);
+
+    // 5. 解码循环
+    FILE *fout = fopen(argv[2], "wb");
+    AVPacket *pkt = av_packet_alloc();
+    AVFrame *frame = av_frame_alloc();
+    long total_samples = 0;
+
+    while (av_read_frame(fmt_ctx, pkt) >= 0) {
+        if (pkt->stream_index != audio_idx) {
+            av_packet_unref(pkt);
+            continue;
+        }
+
+        avcodec_send_packet(dec_ctx, pkt);
+        while (avcodec_receive_frame(dec_ctx, frame) == 0) {
+            // 转换为 S16 交错格式
+            int out_samples = frame->nb_samples;
+            int16_t *out_buf = new int16_t[out_samples *
+                               dec_ctx->ch_layout.nb_channels];
+            uint8_t *out_ptr = reinterpret_cast<uint8_t *>(out_buf);
+
+            swr_convert(swr, &out_ptr, out_samples,
+                        const_cast<const uint8_t **>(frame->data),
+                        frame->nb_samples);
+
+            int bytes = out_samples * dec_ctx->ch_layout.nb_channels *
+                        sizeof(int16_t);
+            fwrite(out_buf, 1, bytes, fout);
+            total_samples += out_samples;
+            delete[] out_buf;
+        }
+        av_packet_unref(pkt);
+    }
+
+    printf("解码完成，总采样帧数: %ld\n", total_samples);
+
+    // 6. 清理
+    fclose(fout);
+    av_frame_free(&frame);
+    av_packet_free(&pkt);
+    swr_free(&swr);
+    avcodec_free_context(&dec_ctx);
+    avformat_close_input(&fmt_ctx);
+    return 0;
+}
+```
+
+**编译与运行：**
+
+```bash
+# Linux / macOS
+g++ -std=c++17 ffmpeg_decode_demo.cpp -o ffmpeg_demo \
+    -lavformat -lavcodec -lswresample -lavutil
+
+# Windows (vcpkg)
+# vcpkg install ffmpeg[avformat,avcodec,swresample]
+g++ -std=c++17 ffmpeg_decode_demo.cpp -o ffmpeg_demo.exe \
+    -lavformat -lavcodec -lswresample -lavutil
+
+./ffmpeg_demo music.mp3 output.raw
+```
+
+**预期输出：**
+
+```
+编解码器: MP3 (MPEG audio layer 3)
+采样率: 44100 Hz, 声道数: 2
+采样格式: fltp (planar=1)
+解码完成，总采样帧数: 220500
+```
+
+> **关键观察点**：注意 MP3 解码输出是 `fltp`（float planar），即每个声道的采样存在不同数组中。SwrContext 负责将其转换为 S16 交错格式，这正是 KrKr2 `FFWaveDecoder` 中 Planar→Interleaved 转换逻辑的简化版本。
+
+---
+
 ## 常见错误与排查
 
 ### 错误 1：回调函数签名不匹配

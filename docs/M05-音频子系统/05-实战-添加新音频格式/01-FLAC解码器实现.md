@@ -845,6 +845,130 @@ tTVPWaveDecoder *FlacWaveDecoderCreator::Create(
 
 ---
 
+## 常见错误及解决方案
+
+### 错误 1：FLAC 回调中 extradata 未正确传递导致解码失败
+
+**现象**：`FLAC__stream_decoder_init_stream` 返回 `FLAC__STREAM_DECODER_INIT_STATUS_ERROR_OPENING_FILE`，或解码第一帧时触发 error_callback 报告 `FLAC__STREAM_DECODER_ERROR_STATUS_LOST_SYNC`。
+
+**原因**：libFLAC 的流式解码器要求正确设置所有回调函数指针。最常见的遗漏是 `metadata_callback`——即使你不关心元数据，也必须提供一个有效的回调（可以为空实现），否则解码器无法正确初始化 STREAMINFO 块。
+
+**解决**：
+
+```cpp
+// 错误：省略 metadata_callback
+FLAC__stream_decoder_init_stream(
+    decoder,
+    read_callback,
+    seek_callback,
+    tell_callback,
+    length_callback,
+    eof_callback,
+    write_callback,
+    nullptr,           // metadata_callback 设为 nullptr — 错误！
+    error_callback,
+    client_data
+);
+
+// 正确：提供空实现
+void metadata_callback(const FLAC__StreamDecoder *decoder,
+                       const FLAC__StreamMetadata *metadata,
+                       void *client_data) {
+    // 至少要处理 STREAMINFO
+    if (metadata->type == FLAC__METADATA_TYPE_STREAMINFO) {
+        auto *self = static_cast<FlacWaveDecoder *>(client_data);
+        self->sampleRate = metadata->data.stream_info.sample_rate;
+        self->channels = metadata->data.stream_info.channels;
+        self->bitsPerSample = metadata->data.stream_info.bits_per_sample;
+        self->totalSamples = metadata->data.stream_info.total_samples;
+    }
+}
+
+// 注意：STREAMINFO 元数据在 init 阶段自动触发 metadata_callback，
+// 不需要手动调用 process_single
+```
+
+### 错误 2：write_callback 中采样位深转换错误
+
+**现象**：16 位 FLAC 文件播放正常，但 24 位 FLAC 文件播放时出现剧烈噪音和失真。
+
+**原因**：libFLAC 的 write_callback 接收的 `buffer[][]` 中每个采样固定为 `FLAC__int32` 类型（32 位有符号整数），但实际有效位数由 STREAMINFO 的 `bits_per_sample` 决定。24 位 FLAC 的采样值范围是 -8388608~8388607，直接当作 16 位值处理会溢出。
+
+**解决**：
+
+```cpp
+FLAC__StreamDecoderWriteStatus write_callback(
+    const FLAC__StreamDecoder *decoder,
+    const FLAC__Frame *frame,
+    const FLAC__int32 *const buffer[],
+    void *client_data) {
+    
+    auto *self = static_cast<FlacWaveDecoder *>(client_data);
+    int bps = self->bitsPerSample;
+    
+    for (unsigned i = 0; i < frame->header.blocksize; i++) {
+        for (unsigned ch = 0; ch < frame->header.channels; ch++) {
+            FLAC__int32 sample = buffer[ch][i];
+            
+            // 错误：不管位深直接截断为 16 位
+            // int16_t out = (int16_t)sample;  // 24 位时溢出！
+            
+            // 正确：根据位深做缩放转换
+            int16_t out;
+            if (bps == 16) {
+                out = (int16_t)sample;             // 直接使用
+            } else if (bps == 24) {
+                out = (int16_t)(sample >> 8);      // 右移 8 位截断到 16 位
+            } else if (bps == 8) {
+                out = (int16_t)(sample << 8);      // 左移 8 位扩展到 16 位
+            } else {
+                // 通用转换
+                out = (int16_t)(sample >> (bps - 16));
+            }
+            
+            self->outputBuffer.push_back(out);
+        }
+    }
+    
+    return FLAC__STREAM_DECODER_WRITE_STATUS_CONTINUE;
+}
+```
+
+### 错误 3：Seek 操作后未清空内部缓冲区导致播放位置不准
+
+**现象**：调用 `SetPosition` 跳转到某个时间点后，实际播放位置偏前——会先听到一小段跳转前的音频残留。
+
+**原因**：`FLAC__stream_decoder_seek_absolute` 会重置解码器内部状态，但应用层的输出缓冲区（`outputBuffer`）中仍残留跳转前解码的 PCM 数据。如果不清空，下次 `Render` 调用会先读取这些旧数据。
+
+**解决**：
+
+```cpp
+bool FlacWaveDecoder::SetPosition(tjs_uint64 samplepos) {
+    // 1. 执行 FLAC seek
+    FLAC__bool ok = FLAC__stream_decoder_seek_absolute(
+        flacDecoder, samplepos);
+    
+    if (!ok) {
+        // seek 失败时需要 flush 恢复解码器状态
+        FLAC__stream_decoder_flush(flacDecoder);
+        return false;
+    }
+    
+    // 2. 清空应用层缓冲区（关键！）
+    outputBuffer.clear();
+    outputBufferReadPos = 0;
+    
+    // 3. 更新当前位置
+    currentSample = samplepos;
+    
+    return true;
+}
+```
+
+> 类似的缓冲区清空逻辑在 Vorbis 解码器的 `SetPosition` 中也存在——`ov_pcm_seek` 后清空任何预读缓冲。
+
+---
+
 ## 动手实践
 
 ### 实践 1：编译测试 FLAC 解码器

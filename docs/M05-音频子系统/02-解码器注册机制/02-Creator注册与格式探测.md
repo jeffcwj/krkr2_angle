@@ -581,6 +581,187 @@ public:
 
 ---
 
+## 动手实践
+
+### 实验 1：模拟完整的 Creator 注册与格式探测链
+
+```cpp
+#include <cstdio>
+#include <cstring>
+#include <functional>
+#include <memory>
+#include <string>
+#include <vector>
+
+// 简化版 Creator 接口
+class IWaveDecoderCreator {
+public:
+    virtual ~IWaveDecoderCreator() = default;
+    // 检查是否支持该扩展名
+    virtual bool CanHandle(const std::string& ext) const = 0;
+    // 尝试用文件头魔数（magic bytes）探测格式
+    virtual bool ProbeFormat(const uint8_t* header, size_t len) const = 0;
+    // 创建解码器实例
+    virtual std::string GetName() const = 0;
+};
+
+// WAV Creator：支持 .wav 扩展名和 RIFF 魔数
+class WavCreator : public IWaveDecoderCreator {
+public:
+    bool CanHandle(const std::string& ext) const override {
+        return ext == ".wav" || ext == ".wave";
+    }
+    bool ProbeFormat(const uint8_t* header, size_t len) const override {
+        // WAV 文件以 "RIFF" 开头，偏移 8 处为 "WAVE"
+        if (len < 12) return false;
+        return memcmp(header, "RIFF", 4) == 0 &&
+               memcmp(header + 8, "WAVE", 4) == 0;
+    }
+    std::string GetName() const override { return "WAV"; }
+};
+
+// OGG Creator：支持 .ogg 扩展名和 OggS 魔数
+class OggCreator : public IWaveDecoderCreator {
+public:
+    bool CanHandle(const std::string& ext) const override {
+        return ext == ".ogg" || ext == ".oga";
+    }
+    bool ProbeFormat(const uint8_t* header, size_t len) const override {
+        if (len < 4) return false;
+        return memcmp(header, "OggS", 4) == 0;
+    }
+    std::string GetName() const override { return "Vorbis/Opus"; }
+};
+
+// 注册表：管理所有 Creator
+class CreatorRegistry {
+    std::vector<std::unique_ptr<IWaveDecoderCreator>> creators_;
+public:
+    void Register(std::unique_ptr<IWaveDecoderCreator> c) {
+        printf("注册解码器 Creator: %s\n", c->GetName().c_str());
+        creators_.push_back(std::move(c));
+    }
+
+    // 策略 1：按扩展名匹配
+    IWaveDecoderCreator* FindByExtension(const std::string& ext) {
+        for (auto& c : creators_) {
+            if (c->CanHandle(ext)) return c.get();
+        }
+        return nullptr;
+    }
+
+    // 策略 2：按文件头魔数探测
+    IWaveDecoderCreator* FindByProbe(const uint8_t* header, size_t len) {
+        for (auto& c : creators_) {
+            if (c->ProbeFormat(header, len)) return c.get();
+        }
+        return nullptr;
+    }
+
+    // 完整探测流程：先按扩展名，失败则按魔数
+    IWaveDecoderCreator* Resolve(const std::string& ext,
+                                  const uint8_t* header, size_t len) {
+        // 第一轮：扩展名匹配
+        auto* c = FindByExtension(ext);
+        if (c) {
+            printf("  扩展名 '%s' 匹配 -> %s\n",
+                   ext.c_str(), c->GetName().c_str());
+            return c;
+        }
+
+        // 第二轮：魔数探测（处理扩展名缺失或错误的情况）
+        c = FindByProbe(header, len);
+        if (c) {
+            printf("  魔数探测匹配 -> %s\n", c->GetName().c_str());
+            return c;
+        }
+
+        printf("  未找到匹配的解码器\n");
+        return nullptr;
+    }
+};
+
+int main() {
+    CreatorRegistry registry;
+    registry.Register(std::make_unique<WavCreator>());
+    registry.Register(std::make_unique<OggCreator>());
+
+    // 模拟文件头
+    uint8_t wavHeader[] = {'R','I','F','F', 0,0,0,0, 'W','A','V','E'};
+    uint8_t oggHeader[] = {'O','g','g','S', 0,0,0,0, 0,0,0,0};
+    uint8_t unknown[]   = {0x89,'P','N','G', 0,0,0,0, 0,0,0,0};
+
+    printf("\n--- 测试 1: 正常扩展名匹配 ---\n");
+    registry.Resolve(".wav", wavHeader, 12);
+
+    printf("\n--- 测试 2: 扩展名错误，靠魔数探测 ---\n");
+    registry.Resolve(".mp3", oggHeader, 12);  // 扩展名是 mp3 但内容是 OGG
+
+    printf("\n--- 测试 3: 完全未知格式 ---\n");
+    registry.Resolve(".png", unknown, 12);
+
+    return 0;
+}
+```
+
+**预期输出**：
+```
+注册解码器 Creator: WAV
+注册解码器 Creator: Vorbis/Opus
+
+--- 测试 1: 正常扩展名匹配 ---
+  扩展名 '.wav' 匹配 -> WAV
+
+--- 测试 2: 扩展名错误，靠魔数探测 ---
+  魔数探测匹配 -> Vorbis/Opus
+
+--- 测试 3: 完全未知格式 ---
+  未找到匹配的解码器
+```
+
+### 实验 2：测试 Creator 注册顺序的优先级影响
+
+在注册表中先注册一个"通配 Creator"（什么格式都声称能处理），再注册特定格式的 Creator，观察优先级行为：
+
+```cpp
+// 通配 Creator：声称支持所有扩展名
+class FallbackCreator : public IWaveDecoderCreator {
+public:
+    bool CanHandle(const std::string& ext) const override {
+        return true;  // 什么都能处理
+    }
+    bool ProbeFormat(const uint8_t* h, size_t l) const override {
+        return true;
+    }
+    std::string GetName() const override { return "FFmpeg-Fallback"; }
+};
+
+// 测试注册顺序影响
+void TestPriority() {
+    // 场景 A：先注册特定格式，再注册通配
+    CreatorRegistry regA;
+    regA.Register(std::make_unique<OggCreator>());
+    regA.Register(std::make_unique<FallbackCreator>());
+    printf("场景A (.ogg): ");
+    auto* c = regA.FindByExtension(".ogg");
+    printf("%s\n", c ? c->GetName().c_str() : "null");
+    // 输出: Vorbis/Opus（特定优先）
+
+    // 场景 B：先注册通配，再注册特定格式
+    CreatorRegistry regB;
+    regB.Register(std::make_unique<FallbackCreator>());
+    regB.Register(std::make_unique<OggCreator>());
+    printf("场景B (.ogg): ");
+    c = regB.FindByExtension(".ogg");
+    printf("%s\n", c ? c->GetName().c_str() : "null");
+    // 输出: FFmpeg-Fallback（通配抢先匹配）
+}
+```
+
+> 💡 这就是 KrKr2 中 FFmpeg 解码器放在 Creator 链末尾的原因——它几乎能解码任何格式，如果放在前面会"吃掉"所有文件，导致专用解码器永远不会被使用。
+
+---
+
 ## 常见错误与排查
 
 ### 错误 1：Creator 生命周期管理不当

@@ -668,6 +668,104 @@ void MixAudioS16Extended(void *dst, const void *src,
 
 ---
 
+## 常见错误及解决方案
+
+### 错误 1：14 位定点音量乘法溢出导致爆音
+
+**现象**：音量设置为最大值（100%）时，部分高振幅采样出现严重削波（clipping），波形方波化。
+
+**原因**：S16 格式中采样值范围为 -32768~32767。如果音量因子使用线性乘法 `sample * volume`，当 volume 接近 16384（14 位定点的 1.0）且 sample 接近 32767 时，中间结果 `32767 * 16384 = 536854528` 超出 int32 精度后右移 14 位仍可能产生非预期值。更常见的错误是用 `int16_t` 存储中间结果导致溢出。
+
+**解决**：
+
+```cpp
+// 错误：中间结果用 16 位存储
+int16_t mixed = (int16_t)(sample * volume);  // 溢出！
+
+// 正确：用 32 位存储中间结果，再右移并饱和截断
+int32_t product = (int32_t)sample * volume;   // volume 是 14 位定点
+int32_t result = product >> 14;               // 还原到 16 位范围
+
+// 饱和截断（防止极端值溢出）
+if (result > 32767)  result = 32767;
+if (result < -32768) result = -32768;
+int16_t output = (int16_t)result;
+```
+
+> 项目中 `MixAudioS16CPP`（`WaveMixer.cpp` 第 36-57 行）使用非线性混音公式避免直接乘法溢出，将两路信号的混合结果约束在合理范围内。
+
+### 错误 2：Oboe 回调线程中执行阻塞操作导致音频卡顿
+
+**现象**：Android 设备上播放音频时出现不规则的卡顿和延迟，Logcat 中可见 `W/Oboe: underrun detected` 警告。
+
+**原因**：Oboe 的 `onAudioReady` 回调在高优先级实时线程中执行，该线程有严格的时间限制（通常 < 5ms）。如果在回调中执行内存分配（`new`/`malloc`）、文件 I/O、日志输出、锁竞争等阻塞操作，会导致缓冲区欠载（underrun）。
+
+**解决**：
+
+```cpp
+// 错误：回调中分配内存和打印日志
+oboe::DataCallbackResult onAudioReady(
+    oboe::AudioStream *stream, void *audioData, int32_t numFrames) {
+    
+    auto *buffer = new float[numFrames * channels];  // 禁止！内存分配
+    LOGI("填充 %d 帧", numFrames);                    // 禁止！日志 I/O
+    
+    std::lock_guard<std::mutex> lock(dataMutex);     // 危险！可能阻塞
+    // ...
+    delete[] buffer;
+    return oboe::DataCallbackResult::Continue;
+}
+
+// 正确：预分配缓冲区，使用无锁队列
+class AudioCallback : public oboe::AudioStreamDataCallback {
+    float preAllocBuffer[MAX_FRAMES * MAX_CHANNELS];  // 预分配
+    LockFreeQueue<AudioChunk> dataQueue;               // 无锁队列
+
+    oboe::DataCallbackResult onAudioReady(
+        oboe::AudioStream *stream, void *audioData, int32_t numFrames) {
+        
+        auto *output = static_cast<float *>(audioData);
+        AudioChunk chunk;
+        if (dataQueue.tryPop(chunk)) {
+            memcpy(output, chunk.data, numFrames * channels * sizeof(float));
+        } else {
+            memset(output, 0, numFrames * channels * sizeof(float));  // 静音
+        }
+        return oboe::DataCallbackResult::Continue;
+    }
+};
+```
+
+> 项目中 `tTVPAudioRendererOboe`（`WaveMixer.cpp` 第 411-485 行）的 `onAudioReady` 直接从预填充的混音缓冲区复制数据，不做任何分配或 I/O。
+
+### 错误 3：Pan 值计算错误导致左右声道音量不平衡
+
+**现象**：设置 Pan=0（居中）时左右声道音量不一致，或设置 Pan 到极端值时另一个声道没有完全静音。
+
+**原因**：Pan 值通常范围为 -10000~10000（KiriKiri 规范），需要正确映射到左右声道的增益因子。常见错误是线性映射而非使用等功率曲线（equal-power panning），或者 Pan 范围边界处理不当。
+
+**解决**：
+
+```cpp
+// 错误：线性映射（Pan 居中时总功率下降 3dB）
+float leftGain  = (10000.0f - pan) / 20000.0f;   // pan=0 → 0.5
+float rightGain = (10000.0f + pan) / 20000.0f;    // pan=0 → 0.5
+// 问题：居中时每声道只有 50% 音量，听感偏小
+
+// 正确：等功率曲线（居中时保持原始响度）
+float panNorm = (pan + 10000.0f) / 20000.0f;     // 归一化到 [0, 1]
+float angle = panNorm * M_PI * 0.5f;              // 映射到 [0, π/2]
+float leftGain  = cosf(angle);                     // 居中时 cos(π/4) ≈ 0.707
+float rightGain = sinf(angle);                     // 居中时 sin(π/4) ≈ 0.707
+// 0.707² + 0.707² = 1.0，总功率恒定
+
+// 项目中 OpenAL 后端的做法（WaveMixer.cpp 第 631-663 行）：
+// 直接使用 alSource3f(AL_POSITION, x, 0, z) 设置空间位置
+// 让 OpenAL 的距离衰减模型自动处理 Pan
+```
+
+---
+
 ## 9. 对照项目源码
 
 ### 关键文件清单

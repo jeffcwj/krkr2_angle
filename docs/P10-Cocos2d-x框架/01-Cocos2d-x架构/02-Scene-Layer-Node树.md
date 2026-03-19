@@ -510,6 +510,16 @@ void MultiLayerScene::update(float dt) {
 }
 ```
 
+## 动手实践
+
+1. **构建三层场景**：创建一个包含背景层（`Layer::create()` + 纯色 `LayerColor`）、游戏层（带 3 个 `Sprite` 节点）和 UI 层（带 `Label` 显示帧率）的场景。通过 `setLocalZOrder` 控制层级顺序，确认 UI 始终显示在最上方。
+
+2. **节点遍历可视化**：为场景中的每个节点重写 `visit` 方法，在其中打印节点名和 zOrder。运行程序后观察控制台输出，验证 Cocos2d-x 的遍历顺序是否符合"zOrder < 0 的子节点 → 自身 → zOrder ≥ 0 的子节点"。
+
+3. **动态增删节点**：编写一个按钮回调，每次点击创建一个新 `Sprite` 添加到场景中的随机位置（`setPosition(rand()%800, rand()%600)`），再编写一个按钮删除最后添加的节点。验证 `removeFromParent` 是否立即生效还是延迟到帧末。
+
+4. **对照 KrKr2 节点树**：阅读 `cpp/core/environ/cocos2d/MainScene.cpp` 中 `TVPMainScene::initialize()` 的代码，画出完整的节点树结构图（_gameNode、_uiNode 及其子节点）。标注每个节点的 zOrder 值，分析为什么 _uiNode 的 zOrder 要设得很大。
+
 ## 对照项目源码
 
 ### KrKr2 的 TVPMainScene 节点树结构

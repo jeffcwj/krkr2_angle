@@ -802,6 +802,26 @@ void TVPMainScene::popUIForm() {
 
 ---
 
+## 常见错误及解决方案
+
+### 错误 1：Action 执行完后节点位置异常
+
+使用 `MoveBy` 移动后发现节点位置不是预期值。原因通常是同一节点上同时运行了多个互相冲突的 Action（如两个 `MoveTo`），或者 Action 的 `duration` 为 0 导致瞬间完成但状态未正确更新。
+
+**解决：** 运行新 Action 前用 `node->stopAllActions()` 清除旧 Action，或用 `node->stopActionByTag(tag)` 精确停止。
+
+### 错误 2：Sequence 中忘记 nullptr 结尾
+
+`Sequence::create(action1, action2)` 不加 `nullptr` 结尾，导致读取栈上的垃圾数据，运行时崩溃或行为异常。
+
+**解决：** 始终使用 `Sequence::create(action1, action2, nullptr)` 或 `Sequence::createWithTwoActions(a, b)`。Cocos2d-x 4.0 的变参列表必须以 `nullptr` 结尾。
+
+### 错误 3：RepeatForever 的 Action 被复用
+
+将同一个 Action 对象传给多个节点的 `runAction`，导致 Action 的 target 被覆盖、状态混乱。
+
+**解决：** 每个节点需要独立的 Action 实例，用 `action->clone()` 创建副本。
+
 ## 本节小结
 
 | 概念 | 说明 |

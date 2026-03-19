@@ -730,6 +730,26 @@ static Button* createDefaultButton(const std::string& title) {
 
 ---
 
+## 常见错误及解决方案
+
+### 错误 1：Label 中文显示为方块或乱码
+
+使用 `Label::createWithTTF` 但中文显示异常。原因通常是字体文件不包含中文字符集（如使用了纯英文字体），或文件路径错误导致回退到系统默认字体。
+
+**解决：** 确保使用包含 CJK 字符的字体（如思源黑体 NotoSansSC），并用 `FileUtils::getInstance()->fullPathForFilename("fonts/NotoSansSC.ttf")` 验证路径。
+
+### 错误 2：Button 点击无响应
+
+`Button::addClickEventListener` 设置了回调但点击无效。常见原因：按钮被其他透明节点遮挡导致触摸事件被吞没，或按钮的 `setEnabled(false)` 被意外调用。
+
+**解决：** 检查按钮的 `isVisible()` 和 `isEnabled()` 状态，用 `setSwallowTouches(false)` 排查是否被上层节点吞没。
+
+### 错误 3：Layout 子节点超出边界
+
+在 `Layout` 中添加的子节点超出了容器范围但仍然可见。默认情况下 `Layout` 不裁剪超出部分。
+
+**解决：** 调用 `layout->setClippingEnabled(true)` 启用裁剪。注意裁剪会增加 Draw Call。
+
 ## 本节小结
 
 | 概念 | 说明 |

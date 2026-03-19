@@ -814,6 +814,26 @@ Controller  Controller Controller
 
 ---
 
+## 常见错误及解决方案
+
+### 错误 1：CSB 文件加载返回 nullptr
+
+`CSLoader::createNode("xxx.csb")` 返回空指针。常见原因：CSB 文件路径不在 Cocos2d-x 的搜索路径中，或 CSB 文件版本与引擎版本不兼容（Cocos Studio 2.x 导出的 CSB 与 3.x 格式不同）。
+
+**解决：** 用 `FileUtils::getInstance()->fullPathForFilename("xxx.csb")` 验证文件是否存在。确保 Cocos Studio 导出时选择的引擎版本与项目匹配。
+
+### 错误 2：CSBReader 按名查找控件返回 nullptr
+
+`nodeMap["btnOK"]` 返回空，但 CSB 文件中确实有这个控件。原因通常是 Cocos Studio 中设置的是节点的 `Tag` 或 `UserData` 而非 `Name` 属性，而 CSBReader 按 `Name` 建立映射。
+
+**解决：** 在 Cocos Studio 中确认控件的 `Name` 字段已填写（不是 `Tag`）。用 CSBReader 的遍历方法打印所有已注册的名称进行排查。
+
+### 错误 3：iTVPBaseForm 布局比例在不同分辨率下错乱
+
+三段式布局（NaviBar 10% + Body 80% + Footer 10%）在某些设备上显示比例不对。原因是使用了绝对像素值而非百分比，或 `setContentSize` 在父节点 resize 后未同步更新。
+
+**解决：** 确保布局计算基于 `getContentSize()` 的百分比而非硬编码像素值。在 `onSizeChanged` 回调中重新计算子节点尺寸。
+
 ## 本节小结
 
 | 概念 | 说明 |

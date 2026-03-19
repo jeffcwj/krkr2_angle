@@ -57,6 +57,25 @@ OpenAL（Open Audio Library）是一套跨平台的 3D 音频 API，设计风格
 | [02](04-实战-完整音频播放器/02-流式播放引擎实现.md) | 流式播放引擎实现 | 多线程解码+播放架构、Buffer Queue 管理、状态机设计 |
 | [03](04-实战-完整音频播放器/03-音量控制与完整播放器.md) | 音量控制与完整播放器 | 音量/声像控制、淡入淡出、播放进度查询、KrKr2 源码对照分析 |
 
+## 术语预览
+
+本模块涉及大量音频编程术语，先在这里建立印象，各章正文会逐一详细讲解：
+
+| 术语 | 英文 | 一句话解释 |
+|------|------|-----------|
+| PCM | Pulse Code Modulation | 脉冲编码调制——把模拟声波变成数字采样值的最基本方式，几乎所有数字音频的"原始格式" |
+| 采样率 | Sample Rate | 每秒对声波取样的次数（如 44100 Hz），决定能还原的最高频率 |
+| 奈奎斯特定理 | Nyquist Theorem | 采样率必须 ≥ 信号最高频率的 2 倍，否则会产生走样失真 |
+| 位深 | Bit Depth | 每个采样值用多少位表示（如 16-bit），位数越高动态范围越大 |
+| OpenAL | Open Audio Library | 跨平台 3D 音频 API，设计风格仿照 OpenGL，是 KrKr2 非 Android 平台的音频输出后端 |
+| Device / Context | — | OpenAL 的两层初始化对象：Device 代表声卡硬件，Context 是渲染状态容器 |
+| Source / Buffer | — | OpenAL 的播放对象：Buffer 装 PCM 数据，Source 控制播放位置和音量 |
+| 缓冲队列 | Buffer Queuing | 把多个小 Buffer 排成队列喂给一个 Source，实现长音频流式播放而不需一次加载整首歌 |
+| 环形缓冲区 | Ring Buffer | 首尾相连的固定大小数组，生产者往里写、消费者往外读，用于音频流的线程安全数据传递 |
+| 延迟 | Latency | 从发出播放指令到扬声器出声的时间差，缓冲区越大延迟越高 |
+| Oboe | — | Google 推出的 Android 高性能音频库，KrKr2 在 Android 平台用它替代 OpenAL |
+| WAV | Waveform Audio | Windows 标准无压缩音频格式，内部存储 PCM 数据加一个文件头 |
+
 ## 项目源码对照
 
 本模块将频繁引用以下 KrKr2 源文件：

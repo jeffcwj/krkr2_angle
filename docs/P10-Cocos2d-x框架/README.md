@@ -72,6 +72,25 @@ UI 组件与布局（Label / Button / CSB 文件 / 事件监听）
 | 02 | 渲染桥接与窗口层 | TVPWindowLayer 架构、DrawSprite 渲染、触摸→鼠标事件转换 |
 | 03 | UI 表单系统与菜单 | iTVPBaseForm / CSBReader、pushUIForm/popUIForm 动画栈、GameMainMenu |
 
+## 术语预览
+
+本模块涉及大量 Cocos2d-x 框架术语，先在这里建立印象，各章正文会逐一详细讲解：
+
+| 术语 | 英文 | 一句话解释 |
+|------|------|-----------|
+| Director | — | Cocos2d-x 的"总导演"单例——负责驱动主循环、管理场景切换和帧调度 |
+| Scene | — | 一个完整的"画面"，包含所有要显示的节点；同一时刻只有一个 Scene 在运行 |
+| Node | — | 场景图的基本构建块——所有可见和不可见的对象都继承自 Node，拥有位置、大小、子节点列表 |
+| Layer | — | 一种特殊的 Node，用于按层组织内容（如背景层、UI 层），Cocos2d-x 3.x 中已弱化 |
+| Sprite | 精灵 | 显示一张图片的 Node，是游戏中最常用的可见元素 |
+| SpriteFrame | 精灵帧 | 大图集（SpriteSheet）中的一个矩形区域，多个 SpriteFrame 共享一张纹理以减少 GPU 切换 |
+| Action | 动作 | 让 Node 动起来的对象——移动、旋转、淡入淡出等动画效果都通过 Action 实现 |
+| zOrder | — | 节点的绘制顺序值——zOrder 越大越后绘制（覆盖在上面），用于控制谁挡住谁 |
+| autorelease | — | Cocos2d-x 的内存管理机制——对象创建后放入自动释放池，帧末自动减引用计数 |
+| CSB | Cocos Studio Binary | Cocos Studio 导出的 UI 布局二进制文件，KrKr2 用 CSLoader 加载它来构建菜单和表单界面 |
+| EventDispatcher | 事件分发器 | Cocos2d-x 的事件系统中枢——管理触摸、键盘、自定义事件的监听和分发 |
+| Mat4 | 4×4 Matrix | 4×4 变换矩阵——用于表示节点的位移、旋转、缩放，是坐标系变换的数学基础 |
+
 ## 与其他模块的关系
 
 - **P04-OpenGL 图形编程** — Cocos2d-x 底层使用 OpenGL ES 2.0 / 3.0，理解 GL 管线有助于读懂渲染代码

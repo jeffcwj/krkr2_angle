@@ -13,7 +13,7 @@
 
 | 节 | 文件 | 内容概要 |
 |----|------|----------|
-| 1.1 | [KiriKiri 历史与生态](./01-KiriKiri引擎背景/01-KiriKiri历史与生态.md) | KiriKiri 的诞生、版本演进（1→2→Z）、TVP/TJS2/KAG 三层架构、插件化设计、XP3 归档、经典游戏生态 |
+| 1.1 | [KiriKiri 历史与生态](./01-KiriKiri引擎背景/01-KiriKiri历史与生态.md) | KiriKiri 的诞生、版本演进（1→2→Z）、TVP/TJS2/KAG 三层架构（见下方术语预览）、插件化设计、XP3 归档格式、经典游戏生态 |
 | 1.2 | [KrKr2 模拟器定位](./01-KiriKiri引擎背景/02-KrKr2模拟器定位.md) | 为什么需要模拟器、跨平台目标、技术选型（C++17/Cocos2d-x/FFmpeg/SDL2/OpenAL）、与原版的关系、当前支持的游戏 |
 
 ### 第 2 章：项目架构总览
@@ -21,7 +21,7 @@
 | 节 | 文件 | 内容概要 |
 |----|------|----------|
 | 2.1 | [目录结构与模块职责](./02-项目架构总览/01-目录结构与模块职责.md) | 项目目录树、各子目录功能说明、核心模块与插件模块的关系 |
-| 2.2 | [CMake 目标关系图](./02-项目架构总览/02-CMake目标关系图.md) | krkr2 / krkr2core / krkr2plugin 三大构建目标、INTERFACE vs STATIC 设计、平台条件编译、CMakePresets |
+| 2.2 | [CMake 目标关系图](./02-项目架构总览/02-CMake目标关系图.md) | krkr2 / krkr2core / krkr2plugin 三大构建目标、INTERFACE（仅传递头文件路径）vs STATIC（编译为静态库）设计、平台条件编译、CMakePresets |
 | 2.3 | [启动流程全链路](./02-项目架构总览/03-启动流程全链路.md) | 从 main.cpp 到游戏场景的全启动链路、AppDelegate 详解、跨平台入口差异、生命周期管理、Director 单例 |
 
 ### 第 3 章：环境搭建
@@ -42,6 +42,22 @@
 | 4.3 | [常见问题排查](./04-第一次构建与运行/03-常见问题排查.md) | 编译错误、运行崩溃、依赖缺失等常见问题的诊断与解决 |
 
 ---
+
+## 术语预览
+
+本模块涉及多个 KiriKiri 引擎和构建系统的专有术语，先在这里建立印象，各章正文会逐一详细讲解：
+
+| 术语 | 英文 | 一句话解释 |
+|------|------|-----------|
+| TVP | T Visual Presenter | KiriKiri 引擎的核心层——负责图像渲染、音频播放、事件处理等底层功能 |
+| TJS2 | T Visual Presenter JavaScript 2 | KiriKiri 的内置脚本语言，语法类似 JavaScript，用于编写游戏逻辑 |
+| KAG | KiriKiri Adventure Game | 基于 TJS2 的上层脚本系统，提供对话、选项、立绘等视觉小说专用指令 |
+| XP3 | — | KiriKiri 的专有归档格式——把游戏资源（图片、音频、脚本）打包成一个 `.xp3` 文件 |
+| AppDelegate | — | Cocos2d-x 的应用入口类，KrKr2 在此初始化 OpenGL 窗口、加载配置并启动游戏场景 |
+| Director | — | Cocos2d-x 的"总导演"单例，驱动主循环（每帧：处理输入→更新逻辑→渲染画面） |
+| INTERFACE 库 | CMake INTERFACE Library | 一种不编译自身代码、只传递头文件路径和编译选项给使用者的 CMake 目标类型 |
+| STATIC 库 | CMake STATIC Library | 编译为 `.a` / `.lib` 静态库文件，链接时整合进最终可执行文件 |
+| CMakePresets | — | CMake 3.19+ 的配置预设文件，把平台/构建类型/工具链参数写在 JSON 里，一条命令就能配置和构建 |
 
 ## 学习建议
 

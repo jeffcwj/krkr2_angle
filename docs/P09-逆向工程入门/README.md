@@ -81,6 +81,26 @@ DLL 分析（导出表 + 签名推断 + 名称反修饰）
 | 03 | 还原 C++ 源码 | 从反编译伪代码到可编译 C++ 源码的完整过程 |
 | 04 | 集成测试与验证 | 编译为静态库、注册到 krkr2plugin、功能测试、对比验证 |
 
+## 术语预览
+
+本模块涉及大量逆向工程术语，先在这里建立印象，各章正文会逐一详细讲解：
+
+| 术语 | 英文 | 一句话解释 |
+|------|------|-----------|
+| 逆向工程 | Reverse Engineering | 从编译后的二进制程序（.exe / .dll）反推出源码逻辑的分析过程 |
+| PE | Portable Executable | Windows 系统的可执行文件格式（.exe / .dll 都是 PE 格式），内部包含代码段、导入导出表等结构 |
+| ELF | Executable and Linkable Format | Linux 系统的可执行文件格式，功能类似 PE，包含程序头表和节头表 |
+| 反汇编 | Disassembly | 把二进制机器码翻译回汇编语言指令，让人类能阅读 |
+| 反编译 | Decompilation | 把二进制机器码翻译成近似 C/C++ 的伪代码，比汇编更易理解但可能不完全准确 |
+| DLL | Dynamic Link Library | Windows 动态链接库文件，KiriKiri 插件就是以 DLL 形式发布的 |
+| 导出表 | Export Table | DLL 文件中记录的"对外公开函数列表"，是逆向分析的第一个切入点 |
+| 导入表 | Import Table | 可执行文件中记录的"需要从外部 DLL 调用的函数列表" |
+| IDA | Interactive DisAssembler | 业界最强的商业反汇编 / 反编译工具，KrKr2 项目的静态逆向选用 IDA Pro |
+| Ghidra | — | NSA（美国国安局）开源的免费反编译工具，功能接近 IDA，适合入门 |
+| x64dbg | — | Windows 平台的开源动态调试器，用于设置断点、单步跟踪、查看内存 |
+| 调用约定 | Calling Convention | 函数调用时参数怎么传、返回值放哪、谁清理栈的规则约定（如 cdecl、stdcall、fastcall） |
+| 名称修饰 | Name Mangling | C++ 编译器把函数名、参数类型编码成一串符号（如 `?foo@@YAXH@Z`），用 undname 工具可以还原 |
+
 ## 与其他模块的关系
 
 - **P08-编译原理基础** — 理解编译流程有助于理解反编译原理

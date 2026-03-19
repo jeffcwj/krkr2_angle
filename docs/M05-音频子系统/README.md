@@ -5,7 +5,7 @@
 
 ## 模块概述
 
-KrKr2 的音频子系统位于 `cpp/core/sound/`，CMake 目标名为 `core_sound_module`。它实现了完整的音频播放栈：从文件解码（Vorbis/Opus/FFmpeg）、PCM 格式转换、循环管理、DSP 滤波（PhaseVocoder 变速不变调），到最终通过 OpenAL 输出到硬件。Android 平台额外使用 Oboe 作为底层音频后端。
+KrKr2 的音频子系统位于 `cpp/core/sound/`，CMake 目标名为 `core_sound_module`。它实现了完整的音频播放栈：从文件解码（Vorbis/Opus/FFmpeg 等多种音频格式解码器）、PCM（脉冲编码调制，音频的原始数字采样数据）格式转换、循环管理、DSP 滤波（PhaseVocoder 变速不变调），到最终通过 OpenAL（跨平台音频输出库）输出到硬件。Android 平台额外使用 Oboe（Google 的高性能音频库）作为底层音频后端。
 
 整个模块通过 TJS2 脚本引擎暴露 `WaveSoundBuffer` 类，游戏脚本可以用 TJS2 代码控制音频的播放、暂停、音量、淡入淡出和循环行为。
 
@@ -90,6 +90,25 @@ OpenAL 混音器（iTVPSoundBuffer / 缓冲管理 / 音量声道 / Oboe）
 | 01 | FLAC 解码器实现 | 从零实现 FLACWaveDecoder：接口对接、libFLAC 集成、CMake 配置 |
 | 02 | 解码器注册与测试 | Creator 注册、格式探测优先级、单元测试编写 |
 | 03 | PCM 格式转换与边界情况 | 多采样率/位深/声道的转换处理、性能优化、常见陷阱 |
+
+## 术语预览
+
+本模块涉及大量音频子系统的专业术语，先在这里建立印象，各章正文会逐一详细讲解：
+
+| 术语 | 英文 | 一句话解释 |
+|------|------|-----------|
+| PCM | Pulse Code Modulation | 脉冲编码调制——音频的最原始数字格式，存储每个时间点的声波采样值 |
+| Vorbis | Ogg Vorbis | 开源有损音频编码格式，KrKr2 的 BGM 和音效常用 `.ogg` 文件 |
+| Opus | — | 新一代开源音频编码格式，低延迟高音质，KrKr2 也内置了解码支持 |
+| FLAC | Free Lossless Audio Codec | 开源无损音频格式，实战章节将从零实现 FLAC 解码器 |
+| DSP | Digital Signal Processing | 数字信号处理——对 PCM 音频数据进行变速、变调、滤波等数学处理 |
+| PhaseVocoder | 相位声码器 | 一种 DSP 算法——通过 FFT 频域处理实现"变速不变调"（加快/减慢播放但不改变音高） |
+| FFT / IFFT | Fast Fourier Transform / Inverse | 快速傅里叶变换——把时域音频信号转换到频域（和反向转换），是 PhaseVocoder 的数学基础 |
+| OpenAL | Open Audio Library | 跨平台 3D 音频 API，KrKr2 在 Windows/Linux/macOS 上用它输出音频 |
+| Oboe | — | Google 推出的 Android 高性能音频库，KrKr2 在 Android 平台用它替代 OpenAL |
+| Creator 注册 | WaveDecoderCreator Registration | KrKr2 的解码器插件机制——每种音频格式注册一个"创建器"，播放时按格式自动选择对应解码器 |
+| CrossFade | 交叉淡入淡出 | 两段音频重叠播放时，前一段淡出同时后一段淡入，实现平滑过渡 |
+| WaveSoundBuffer | — | KrKr2 暴露给 TJS2 脚本的音频播放器类，游戏脚本用它控制播放、暂停、音量等 |
 
 ## 源码文件速查
 

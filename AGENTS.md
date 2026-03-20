@@ -338,6 +338,7 @@ ctest --test-dir out/<platform>/debug --output-on-failure
 | M07-TJS2脚本引擎 | ✅ 已完成 | 24 md + README | 8章拆分为子目录，每章3节，术语审查通过 |
 | P11-SDL2跨平台开发 | ✅ 已完成 | 14 md + README | 3章拆分为子目录，每章4-5节，术语审查通过 |
 | M08-归档与IO系统 | ✅ 已完成 | 18 md + README | 6章拆分为子目录，每章3节，术语审查通过 |
+| M09-插件系统与开发 | ✅ 已完成 | 18 md + README | 6章拆分为子目录，每章3节（含ncbind/simplebinder框架详解、插件源码导读、从零开发实战、插件清单与贡献指南），术语审查通过 |
 
 ## 项目目标
 

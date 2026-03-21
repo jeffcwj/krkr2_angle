@@ -341,6 +341,7 @@ ctest --test-dir out/<platform>/debug --output-on-failure
 | M09-插件系统与开发 | ✅ 已完成 | 18 md + README | 6章拆分为子目录，每章3节（含ncbind/simplebinder框架详解、插件源码导读、从零开发实战、插件清单与贡献指南），术语审查通过 |
 | M10-测试与质量保证 | ✅ 已完成 | 10 md + README | 3章拆分为子目录，每章3节（含Catch2框架详解、项目测试架构、tTVPRect实战测试、CI集成），术语审查通过 |
 | M11-CI-CD与Docker | ✅ 已完成 | 10 md + README | 3章拆分为子目录，每章3节（含GitHub Actions工作流、Docker构建环境、代码质量门禁），术语审查通过 |
+| P12-现代跨平台UI | ✅ 已完成 | 11 md + README | 5章拆分为子目录，每章2节（含Flutter引擎嵌入、Compose Multiplatform、UI与渲染分离、KrKr2 UI抽象层实战），术语审查通过 |
 
 ## 项目目标
 

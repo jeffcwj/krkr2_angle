@@ -11,8 +11,8 @@
 | LayerExImage.dll       | https://github.com/wtnbgo/layerExImage                                                                  |
 | LayerExSave.dll        | https://github.com/wtnbgo/layerExSave                                                                   |
 | PSBFile.dll            | M2 Inc. PSB Library                                                                                     |
-| PackinOne.dll          | nan                                                                                                     |
-| TextRender.dll         | nan                                                                                                     |
+| PackinOne.dll          | Reversed in M12; see `cpp/plugins/packinone/` — LZ4 stream compress/decompress, TemporaryFiles, StoragesFstat, ScriptsAdd, FontEx, LayerEx |
+| TextRender.dll         | Reversed in M12; see `cpp/plugins/textrender/` — FreeType software rasterizer, GlyphLRU cache, cross-platform font finder |
 | addFont.dll            | https://github.com/wtnbgo/addFont                                                                       |
 | csvParser.dll          | https://github.com/wtnbgo/csvParser                                                                     |
 | dirlist.dll            | https://github.com/krkrz/krkrz/tree/last_hodgepodge_repository/src/plugins/win32/dirlist                |

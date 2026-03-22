@@ -153,6 +153,71 @@ ctest --test-dir out/<platform>/debug --output-on-failure
 - **ccache** supported — auto-detected by CMakeLists.txt
 - Subdirectory AGENTS.md files exist for: `cpp/core/`, `cpp/plugins/`, `cpp/core/tjs2/`, `cpp/core/visual/`, `cpp/core/environ/`, `cpp/core/movie/ffmpeg/`, `platforms/`, `cpp/core/sound/`, `cpp/core/base/`, `tests/`
 
+## stuffs/ 目录（本地资源，不提交 git）
+
+`stuffs/` 目录存放逆向工程相关的本地资源文件，已加入 `.gitignore`，**不提交到 git 仓库**。
+
+```
+stuffs/
+├── IDA_Pro_7.6/              # IDA Pro 7.6 安装目录（含 idat64.exe）
+├── 星光咖啡馆与死神之蝶kr插件/  # 实际游戏 DLL 二进制 + IDA 数据库
+│   ├── PackinOne.dll + .i64   # 压缩/扩展插件（648 KB，1999 函数）
+│   └── textrender.dll + .i64  # 文本渲染插件（222 KB，828 函数）
+└── ida_scripts/               # IDAPython 脚本工具集
+    ├── common.py              # 通用工具模块（初始化、输出重定向、参数解析）
+    ├── decompile_func.py      # 反编译指定地址的函数（需 Hex-Rays）
+    ├── batch_decompile.py     # 批量反编译多个函数（需 Hex-Rays）
+    ├── disasm_func.py         # 反汇编指定地址的函数
+    ├── func_info.py           # 获取函数详细信息（名称、大小、标志、调用者）
+    ├── get_xrefs.py           # 查找交叉引用（调用者/被调用者）
+    ├── read_data.py           # 读取原始数据（hex/str/dwords/qwords）
+    ├── search_funcs.py        # 按名称模式搜索函数
+    ├── extract_packinone.py   # PackinOne 专用分析脚本 → packinone_analysis.txt
+    ├── extract_textrender.py  # TextRender 专用分析脚本 → textrender_analysis.txt
+    ├── packinone_analysis.txt # PackinOne IDA 分析结果（2598 行）
+    └── textrender_analysis.txt# TextRender IDA 分析结果（2483 行）
+```
+
+### IDA 脚本使用方法
+
+```bash
+# 通用脚本（common.py 提供基础设施）
+# 运行命令格式: idat64.exe -A -L"log.txt" -S"脚本.py 参数" "数据库.i64"
+
+# 反编译单个函数
+idat64.exe -A -S"decompile_func.py 0x1000DFE0 output.c" textrender.i64
+
+# 批量反编译
+idat64.exe -A -S"batch_decompile.py 0x84BA6C,0xB67FE8 output.c" database.i64
+
+# 反汇编函数
+idat64.exe -A -S"disasm_func.py 0x1001B680 asm.txt" textrender.i64
+
+# 获取函数信息
+idat64.exe -A -S"func_info.py 0x1000DFE0" textrender.i64
+
+# 查找交叉引用
+idat64.exe -A -S"get_xrefs.py 0x1001B680 xrefs.txt" textrender.i64
+
+# 读取原始数据
+idat64.exe -A -S"read_data.py 0x150AC00 256 hex" database.i64
+
+# 按名称搜索函数
+idat64.exe -A -S"search_funcs.py TextRender results.txt" textrender.i64
+
+# 导出全量分析（已有结果文件）
+idat64.exe -A -S"extract_packinone.py" PackinOne.i64
+idat64.exe -A -S"extract_textrender.py" textrender.i64
+```
+
+### IDA 环境注意事项
+
+- **IDA 7.6 需要 Python 3.8**（已通过 `idapyswitch.exe` 配置），Python 3.14 不兼容
+- 退出脚本使用 `idc.qexit(0)`（不是 `ida_idaapi.qexit()`）
+- `.i64` 文件必须用 `idat64.exe`（64位），`idat.exe` 无法打开
+- 插件加载错误（findcrypt3.py/keypatch.py）可忽略，不影响脚本执行
+- 所有通用脚本依赖 `common.py`，确保 `ida_scripts/` 目录结构完整
+
 ## 更新注意事项
 
 - **语言要求：** 新增文档、注释、文档文件名均使用中文
@@ -342,6 +407,7 @@ ctest --test-dir out/<platform>/debug --output-on-failure
 | M10-测试与质量保证 | ✅ 已完成 | 10 md + README | 3章拆分为子目录，每章3节（含Catch2框架详解、项目测试架构、tTVPRect实战测试、CI集成），术语审查通过 |
 | M11-CI-CD与Docker | ✅ 已完成 | 10 md + README | 3章拆分为子目录，每章3节（含GitHub Actions工作流、Docker构建环境、代码质量门禁），术语审查通过 |
 | P12-现代跨平台UI | ✅ 已完成 | 11 md + README | 5章拆分为子目录，每章2节（含Flutter引擎嵌入、Compose Multiplatform、UI与渲染分离、KrKr2 UI抽象层实战），术语审查通过 |
+| M12-插件逆向与实现 | ✅ 已完成 | 15 md + README | 6章拆分为子目录，每章2节（含PackinOne/TextRender逆向实战、IDA分析数据、静态库编译与测试编写），术语审查通过 |
 
 ## 项目目标
 

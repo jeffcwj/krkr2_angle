@@ -17,3 +17,6 @@ local.properties
 java_pid*.hprof
 .DS_Store
 *.pdb
+
+# 本地逆向工程资源（IDA Pro、DLL二进制、IDA脚本等），不提交
+stuffs/

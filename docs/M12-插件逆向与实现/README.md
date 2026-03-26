@@ -47,6 +47,7 @@ KiriKiri/吉里吉里引擎（一款日本 Visual Novel 视觉小说游戏引擎
 | 05 | [实战：逆向 TextRender](./05-实战-逆向TextRender/) | 2 节 | TextRender 文字渲染接口分析与字体处理逻辑、渲染逻辑还原与跨平台（FreeType）适配 |
 | 06 | [逆向成果集成](./06-逆向成果集成/) | 2 节 | 逆向代码编译为静态库并注册到 krkr2plugin、测试编写与插件清单维护流程 |
 | 07 | [实战：适配 WindowEx](./07-实战-适配WindowEx/) | 3 节 | WindowEx 原始 Win32 源码全景分析（消息接收器架构、30+ TJS 接口）、跨平台适配三层策略（165 个 WM_* 常量补定义、类型 shim、方法 stub 化）、无源码逆向对比验证（导入表推断、RTTI 还原类名、最大函数定位、IDAPython 脚本实战） |
+| 08 | [IDAPython 深度符号还原](./08-IDAPython深度符号还原/) | 3 节 | MSVC RTTI 内存布局与 TypeDescriptor 扫描、用 `idc.set_name`/`SetType` 批量重命名函数并应用签名、用 `add_struc`/`add_struc_member` 还原 WindowEx 结构体、`op_stroff` 将 `[ecx+4]` 标注为 `this->hwnd`、`idc_parse_types` 注册类型库、生成跨平台还原头文件 |
 
 ## 学习路线
 
@@ -76,11 +77,15 @@ M09-插件系统与开发          P09-逆向工程入门
    （编译、注册、测试、发布）
                 │
                 ▼
-    07-实战适配WindowEx ← 有源码插件完整适配案例
-  （原始分析→适配策略→逆向验证）
-                │
-                ▼
-      M13-UI框架替换实战
+     07-实战适配WindowEx ← 有源码插件完整适配案例
+   （原始分析→适配策略→逆向验证）
+                 │
+                 ▼
+    08-IDAPython深度符号还原
+  （RTTI→类名→结构体→头文件）
+                 │
+                 ▼
+       M13-UI框架替换实战
 ```
 
 ## 实践环境准备

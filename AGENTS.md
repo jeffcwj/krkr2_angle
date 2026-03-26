@@ -407,7 +407,7 @@ idat64.exe -A -S"extract_textrender.py" textrender.i64
 | M10-测试与质量保证 | ✅ 已完成 | 10 md + README | 3章拆分为子目录，每章3节（含Catch2框架详解、项目测试架构、tTVPRect实战测试、CI集成），术语审查通过 |
 | M11-CI-CD与Docker | ✅ 已完成 | 10 md + README | 3章拆分为子目录，每章3节（含GitHub Actions工作流、Docker构建环境、代码质量门禁），术语审查通过 |
 | P12-现代跨平台UI | ✅ 已完成 | 11 md + README | 5章拆分为子目录，每章2节（含Flutter引擎嵌入、Compose Multiplatform、UI与渲染分离、KrKr2 UI抽象层实战），术语审查通过 |
-| M12-插件逆向与实现 | ✅ 已完成 | 18 md + README | 6章+第07实战章，07章含3节（WindowEx原始源码分析、跨平台适配三层策略、无源码逆向对比验证+IDAPython实战），PackinOne/TextRender逆向实战、IDA分析数据、静态库编译与测试编写，术语审查通过 |
+| M12-插件逆向与实现 | ✅ 已完成 | 21 md + README | 6章+第07实战章+第08章，07章含3节（WindowEx原始源码分析、跨平台适配三层策略、无源码逆向对比验证+IDAPython实战），08章含3节（RTTI符号还原+函数重命名、结构体布局还原+op_stroff偏移标注、跨平台头文件生成+idc_parse_types类型库），PackinOne/TextRender逆向实战、IDA分析数据、静态库编译与测试编写，术语审查通过 |
 | M13-UI框架替换实战 | ✅ 已完成 | 12 md + README | 6章拆分为子目录，每章2节（含Cocos2d-x UI分析、抽象接口设计、Flutter/Compose嵌入实战、纹理共享与事件同步、渐进式迁移方案、A/B测试与回归验证），术语审查通过 |
 
 ## 项目目标
